@@ -1,0 +1,4 @@
+.env
+credentials.json
+backend/.env
+backend/tools/credentials.json
