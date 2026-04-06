@@ -2,11 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_groq import ChatGroq
-from langchain_core.runnables import RunnablePassthrough
-from langchain.agents import AgentExecutor
-from langchain_core.agents import create_tool_calling_agent
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from tools.agent_tools import google_search, save_lead
 from dotenv import load_dotenv
 import os
@@ -22,12 +18,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Groq LLM ───
+# ─── Groq LLM with tools ───
 llm = ChatGroq(
     api_key=os.getenv("GROQ_API_KEY"),
     model="llama-3.3-70b-versatile",
     temperature=0.7,
-)
+).bind_tools([google_search, save_lead])
 
 system_prompt = """
 You are Infomary, a warm and professional AI assistant for InfoSenior.care, a senior care platform in the United States.
@@ -91,52 +87,32 @@ Say: "Your information has been saved. Our team will be in touch shortly."
 - Never repeat greeting
 - One question at a time
 - Always listen before asking
-"""
+""" 
 
-# ─── Prompt ───
-prompt = ChatPromptTemplate.from_messages([
-    ("system", system_prompt),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad"),
-])
-
-# ─── Agent ───
-tools = [google_search, save_lead]
-agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(
-    agent=agent,
-    tools=tools,
-    verbose=True,
-    max_iterations=5,
-)
-
-# ─── Request Model ───
 class ChatRequest(BaseModel):
     message: str
     history: list = []
 
-# ─── Chat Endpoint ───
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    # History convert karo LangChain messages mein
-    chat_history = []
+    messages = [SystemMessage(content=system_prompt)]
+    
     for msg in req.history:
         if msg["role"] == "user":
-            chat_history.append(HumanMessage(content=msg["content"]))
+            messages.append(HumanMessage(content=msg["content"]))
         elif msg["role"] == "assistant":
-            chat_history.append(AIMessage(content=msg["content"]))
-
-    result = await agent_executor.ainvoke({
-        "input": req.message,
-        "chat_history": chat_history,
-    })
+            messages.append(AIMessage(content=msg["content"]))
+    
+    messages.append(HumanMessage(content=req.message))
+    
+    response = await llm.ainvoke(messages)
+    output = response.content
 
     return {
-        "response": result["output"],
+        "response": output,
         "history": req.history + [
             {"role": "user", "content": req.message},
-            {"role": "assistant", "content": result["output"]}
+            {"role": "assistant", "content": output}
         ]
     }
 
