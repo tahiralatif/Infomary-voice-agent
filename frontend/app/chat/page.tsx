@@ -15,14 +15,13 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // Start conversation
     if (messages.length === 0) {
       setMessages([{
         role: 'assistant',
         content: "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?"
       }])
     }
-  }, [])
+  }, [messages.length])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -52,7 +51,7 @@ export default function ChatPage() {
       setMessages(prev => [...prev, assistantMessage])
       setHistory(data.history)
 
-    } catch (error) {
+    } catch {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: "I'm sorry, something went wrong. Please try again."

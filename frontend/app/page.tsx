@@ -5,22 +5,39 @@ import Vapi from '@vapi-ai/web'
 
 const vapi = new Vapi(process.env.NEXT_PUBLIC_VAPI_KEY!)
 
+interface Session {
+  id: string
+  date: string
+}
+
+interface VapiMessage {
+  type: string
+  transcript?: string
+  transcriptType?: string
+  role?: string
+  status?: string
+}
+
 export default function Home() {
   const [calling, setCalling] = useState(false)
   const [speaking, setSpeaking] = useState<'user' | 'assistant' | null>(null)
   const [sessionId, setSessionId] = useState<string>('')
-  const [sessions, setSessions] = useState<{id: string, date: string}[]>([])
+  const [sessions, setSessions] = useState<Session[]>([])
   const [isHydrated, setIsHydrated] = useState(false)
   const [status, setStatus] = useState('Press the button to start')
-  const handlerRef = useRef<((msg: any) => void) | null>(null)
+  const handlerRef = useRef<((msg: VapiMessage) => void) | null>(null)
+
+  const presetHeights = [22, 34, 15, 41, 28, 12, 39, 21, 45, 18, 25, 32, 11, 40, 19, 36, 14, 29, 43, 20]
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     setIsHydrated(true)
     const stored = localStorage.getItem('voice_session_id') || crypto.randomUUID()
     localStorage.setItem('voice_session_id', stored)
     setSessionId(stored)
     const storedSessions = JSON.parse(localStorage.getItem('sessions') || '[]')
     setSessions(storedSessions)
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [])
 
   const saveMessage = async (role: string, content: string, sid: string) => {
@@ -36,9 +53,9 @@ export default function Home() {
     if (!sessionId || !isHydrated) return
     if (handlerRef.current) vapi.off('message', handlerRef.current)
 
-    const handleMessage = (msg: any) => {
-      if (msg.type === 'transcript' && msg.transcriptType === 'final') {
-        saveMessage(msg.role, msg.transcript, sessionId)
+    const handleMessage = (msg: VapiMessage) => {
+      if (msg.type === 'transcript' && msg.transcriptType === 'final' && msg.transcript) {
+        saveMessage(msg.role || 'user', msg.transcript, sessionId)
         setSpeaking(msg.role === 'user' ? 'user' : 'assistant')
         setTimeout(() => setSpeaking(null), 1500)
       }
@@ -175,7 +192,7 @@ export default function Home() {
                 }`}
                 style={{
                   height: calling && speaking
-                    ? `${Math.random() * 40 + 8}px`
+                    ? `${presetHeights[i]}px`
                     : '4px',
                   animationDelay: `${i * 50}ms`
                 }}

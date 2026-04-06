@@ -1,0 +1,34 @@
+﻿
+> infomaryproj@0.1.0 lint
+> eslint
+
+
+D:\Documents\office-work\Infomary\infomaryproj\frontend\app\page.tsx
+   30:9   warning  'waveformHeights' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 @typescript-eslint/no-unused-vars
+   31:45  error    Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+D:\Documents\office-work\Infomary\infomaryproj\frontend\app\page.tsx:31:45
+  29 |
+  30 |   const waveformHeights = useMemo(() => {
+> 31 |     return Array.from({ length: 20 }, () => Math.random() * 40 + 8)
+     |                                             ^^^^^^^^^^^^^ Cannot call impure function
+  32 |   }, [])
+  33 |
+  34 |   useEffect(() => {                                                                       react-hooks/purity
+  195:26  error    Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+D:\Documents\office-work\Infomary\infomaryproj\frontend\app\page.tsx:195:26
+  193 |                 style={{
+  194 |                   height: calling && speaking
+> 195 |                     ? `${Math.random() * 40 + 8}px`
+      |                          ^^^^^^^^^^^^^ Cannot call impure function
+  196 |                     : '4px',
+  197 |                   animationDelay: `${i * 50}ms`
+  198 |                 }}  react-hooks/purity
+
+Γ£û 3 problems (2 errors, 1 warning)
+
