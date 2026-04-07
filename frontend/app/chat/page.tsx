@@ -46,7 +46,7 @@ export default function ChatPage() {
       })
 
       const data = await res.json()
-      
+
       const assistantMessage: Message = { role: 'assistant', content: data.response }
       setMessages(prev => [...prev, assistantMessage])
       setHistory(data.history)
@@ -70,7 +70,7 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen bg-gray-950 text-white">
-      
+
       {/* Sidebar */}
       <div className="w-56 bg-gray-900 border-r border-gray-800 flex flex-col p-4">
         <h2 className="text-base font-bold text-blue-400 mb-4">InfoMary</h2>
@@ -86,14 +86,14 @@ export default function ChatPage() {
           </Link>
           <Link href="/chat" className="text-xs text-blue-400 font-semibold bloc
           k py-2">
-             Text Agent
+            Text Agent
           </Link>
         </div>
       </div>
 
       {/* Main */}
       <div className="flex-1 flex flex-col">
-        
+
         {/* Header */}
         <div className="bg-gray-900 border-b border-gray-800 p-4">
           <h1 className="text-lg font-bold text-blue-400">InfoSenior.care</h1>
@@ -104,18 +104,17 @@ export default function ChatPage() {
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              
+
               {msg.role === 'assistant' && (
                 <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-sm mr-3 flex-shrink-0 mt-1">
                   🩺
                 </div>
               )}
 
-              <div className={`max-w-lg px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-blue-600 text-white rounded-tr-sm'
-                  : 'bg-gray-800 text-gray-100 rounded-tl-sm'
-              }`}>
+              <div className={`max-w-lg px-4 py-3 rounded-2xl text-sm leading-relaxed ${msg.role === 'user'
+                ? 'bg-blue-600 text-white rounded-tr-sm'
+                : 'bg-gray-800 text-gray-100 rounded-tl-sm'
+                }`}>
                 {msg.content}
               </div>
 
@@ -129,9 +128,9 @@ export default function ChatPage() {
               </div>
               <div className="bg-gray-800 px-4 py-3 rounded-2xl rounded-tl-sm">
                 <div className="flex gap-1 items-center h-4">
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0ms'}} />
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '150ms'}} />
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '300ms'}} />
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
               </div>
             </div>
