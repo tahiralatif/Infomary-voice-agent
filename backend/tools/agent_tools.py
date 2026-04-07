@@ -7,16 +7,21 @@ import gspread
 import resend
 import json
 import httpx
+import logging
 from google.oauth2.service_account import Credentials
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 SENDER_EMAIL = os.getenv("SENDER_EMAIL")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1sJYvoP4BOVeMWaFGBOPTtpuJKrY847n3GQzElQyPRKY/edit?usp=sharing"
-CREDENTIALS_FILE = "credentials.json"
+CREDENTIALS_FILE = os.path.join(os.path.dirname(__file__), "credentials.json")
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -150,7 +155,7 @@ async def _send_email(lead: dict) -> dict:
         resend.api_key = os.getenv("RESEND_API_KEY")
         resend.Emails.send({
             "from": "InfoSenior.care <onboarding@resend.dev>",
-            "to": SENDER_EMAIL,
+            "to": "uzairlatif293@gmail.com",  # Testing mode - only verified email
             "subject": f"New Lead: {lead.get('name', 'Unknown')} — {lead.get('care_need', 'N/A')} — {lead.get('location', 'N/A')}",
             "html": _build_html_email(lead)
         })

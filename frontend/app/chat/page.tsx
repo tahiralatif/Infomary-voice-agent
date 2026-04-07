@@ -36,7 +36,7 @@ export default function ChatPage() {
     setLoading(true)
 
     try {
-      const res = await fetch(`${process.env.NEXT_BACKEND_URL}/chat`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_NEXT_BACKEND_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

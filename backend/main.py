@@ -2,10 +2,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from tools.agent_tools import google_search, save_lead
 from dotenv import load_dotenv
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -30,6 +35,7 @@ You are Infomary, a warm and professional AI assistant for InfoSenior.care, a se
 
 # WHO YOU ARE
 You are not a form-filler. You are a caring advisor who listens first, then gently guides. You never rush. You never overwhelm. You respond to what the user is feeling, not just what they are saying.
+Always use google_search tool when user asks about facilities, hospitals, or location specific information
 
 # PERSONALITY
 - Calm, warm, professional — like a trusted healthcare advisor
@@ -95,6 +101,11 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
+    logger.info("="*80)
+    logger.info("[CHAT] New chat request received")
+    logger.info(f"[CHAT] User message: {req.message}")
+    logger.info(f"[CHAT] History length: {len(req.history)}")
+    
     messages = [SystemMessage(content=system_prompt)]
     
     for msg in req.history:
@@ -105,9 +116,64 @@ async def chat(req: ChatRequest):
     
     messages.append(HumanMessage(content=req.message))
     
-    response = await llm.ainvoke(messages)
+    # Tool calling loop - execute tools and continue conversation
+    max_iterations = 5
+    iteration = 0
+    
+    while iteration < max_iterations:
+        iteration += 1
+        logger.info(f"[LLM] Invoking LLM (iteration {iteration})")
+        logger.info(f"[LLM] Messages in context: {len(messages)}")
+        
+        response = await llm.ainvoke(messages)
+        
+        # Log the response
+        logger.info(f"[LLM] Response type: {type(response)}")
+        logger.info(f"[LLM] Has tool_calls: {hasattr(response, 'tool_calls') and bool(response.tool_calls)}")
+        logger.info(f"[LLM] Content: {response.content[:200] if response.content else '(empty)'}")
+        
+        if hasattr(response, 'tool_calls') and response.tool_calls:
+            logger.info(f"[TOOLS] Found {len(response.tool_calls)} tool call(s)")
+            
+            # Add AI response to messages
+            messages.append(response)
+            
+            # Execute each tool
+            for tool_call in response.tool_calls:
+                tool_name = tool_call.get("name")
+                tool_args = tool_call.get("args", {})
+                tool_id = tool_call.get("id")
+                
+                logger.info(f"[TOOLS] Executing tool: {tool_name}")
+                logger.info(f"[TOOLS] Tool args: {tool_args}")
+                
+                try:
+                    # Map tool name to function
+                    if tool_name == "google_search":
+                        result = await google_search.ainvoke(tool_args)
+                    elif tool_name == "save_lead":
+                        result = await save_lead.ainvoke(tool_args)
+                    else:
+                        result = f"Unknown tool: {tool_name}"
+                    
+                    logger.info(f"[TOOLS] Tool result: {str(result)[:300]}")
+                    
+                    # Add tool result to messages
+                    messages.append(
+                        ToolMessage(content=str(result), tool_call_id=tool_id)
+                    )
+                except Exception as e:
+                    logger.error(f"[TOOLS] Tool execution error: {e}")
+                    messages.append(
+                        ToolMessage(content=f"Error: {str(e)}", tool_call_id=tool_id)
+                    )
+        else:
+            # No tool calls - final response
+            logger.info(f"[CHAT] Final response: {response.content[:200]}")
+            break
+    
     output = response.content
-
+    
     return {
         "response": output,
         "history": req.history + [
