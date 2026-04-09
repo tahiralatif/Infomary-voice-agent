@@ -76,7 +76,7 @@ export default function Home() {
   const startCall = () => {
     if (!sessionId || !isHydrated) return
     setStatus('Connecting...')
-    vapi.start('ddc6053b-c827-42d2-ad85-7fe842a621ef')
+    vapi.start('d8c9d013-9205-4c60-aa27-491c77725691')
   }
   const stopCall = () => { vapi.stop(); setStatus('Press the button to start') }
 
