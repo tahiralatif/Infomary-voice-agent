@@ -41,3 +41,4 @@ langchain-core
 langchain-groq
 resend
 gspread
+asyncpg>=0.31.0
