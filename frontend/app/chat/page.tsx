@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 
@@ -25,7 +25,7 @@ function generateSessionId(): string {
   return crypto.randomUUID()
 }
 
-export default function ChatPage() {
+function ChatContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -165,16 +165,16 @@ export default function ChatPage() {
 
   const handleDeleteConfirm = async () => {
     if (!deleteConfirm) return
-    
+
     try {
       await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/delete-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: deleteConfirm })
       })
-      
+
       addToast('Chat deleted successfully', 'success')
-      
+
       // If deleting current session, start new chat
       if (deleteConfirm === sessionId) {
         startNewChat()
@@ -251,7 +251,7 @@ export default function ChatPage() {
     const now = new Date()
     const diffMs = now.getTime() - date.getTime()
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-    
+
     if (diffDays === 0) return 'Today'
     if (diffDays === 1) return 'Yesterday'
     if (diffDays < 7) return `${diffDays} days ago`
@@ -266,11 +266,10 @@ export default function ChatPage() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-slide-in ${
-              toast.type === 'success' ? 'bg-green-600 text-white' :
+            className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-slide-in ${toast.type === 'success' ? 'bg-green-600 text-white' :
               toast.type === 'error' ? 'bg-red-600 text-white' :
-              'bg-blue-600 text-white'
-            }`}
+                'bg-blue-600 text-white'
+              }`}
           >
             {toast.message}
           </div>
@@ -330,9 +329,8 @@ export default function ChatPage() {
             {sessions.map((session) => (
               <div
                 key={session.session_id}
-                className={`group relative rounded-lg transition-colors ${
-                  sessionId === session.session_id ? 'bg-gray-800 border-l-2 border-blue-500' : 'hover:bg-gray-800'
-                }`}
+                className={`group relative rounded-lg transition-colors ${sessionId === session.session_id ? 'bg-gray-800 border-l-2 border-blue-500' : 'hover:bg-gray-800'
+                  }`}
               >
                 <button
                   onClick={() => loadSession(session.session_id)}
@@ -458,3 +456,12 @@ export default function ChatPage() {
     </div>
   )
 }
+
+
+export default function ChatPage() {
+  return (
+    <Suspense>
+      <ChatContent />
+    </Suspense>
+  )
+} 
