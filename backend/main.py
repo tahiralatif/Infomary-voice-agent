@@ -10,7 +10,6 @@ import os
 load_dotenv()
 
 app = FastAPI()
-print(os.getenv("FRONTEND_URL"))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3001", os.getenv("FRONTEND_URL", "http://localhost:3000")],
@@ -21,8 +20,8 @@ app.add_middleware(
 # ─── Groq LLM with tools ───
 llm = ChatGroq(
     api_key=os.getenv("GROQ_API_KEY"),
-    model="llama-3.3-70b-versatile",
-    temperature=0.7,
+    model="openai/gpt-oss-120b",
+    temperature=0.4,
 ).bind_tools([google_search, save_lead])
 
 system_prompt = """
