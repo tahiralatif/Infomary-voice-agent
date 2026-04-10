@@ -9,14 +9,23 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@speechmatics/auth": "^0.1.0",
+    "@speechmatics/browser-audio-input": "^2.0.3",
+    "@speechmatics/flow-client": "^0.2.2",
+    "@speechmatics/web-pcm-player": "^1.0.0",
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/auth-ui-react": "^0.4.7",
     "@supabase/auth-ui-shared": "^0.1.8",
     "@supabase/supabase-js": "^2.101.1",
-    "@vapi-ai/web": "^2.5.2",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "motion": "^12.38.0",
     "next": "^16.2.2",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
