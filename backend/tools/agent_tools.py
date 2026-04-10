@@ -23,16 +23,14 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-# ─── In-Memory Session Tracker ────────────────────────────────────────────────
-# { session_id: { "lead_id": str, "row_index": int|None, "email_sent": bool } }
+# Session tracking for progressive saving
 _sessions: dict = {}
 
-# ─── Schemas ──────────────────────────────────────────────────────────────────
 class GoogleSearchInput(BaseModel):
     query: str
 
 class SaveLeadInput(BaseModel):
-    session_id: str = ""   # REQUIRED — same session_id every call
+    session_id: str = ""
     name: str = ""
     email: str = ""
     phone: str = ""
@@ -56,8 +54,8 @@ class SaveLeadInput(BaseModel):
     other_factors: str = ""
     transportation: str = ""
 
-# ─── Email HTML Builder ───────────────────────────────────────────────────────
 def _build_html_email(lead: dict) -> str:
+    # Build HTML table rows for existing lead data
     def row(label, key):
         value = lead.get(key, "")
         if not value or str(value).strip() in ("", "None", "none"):
@@ -97,35 +95,30 @@ def _build_html_email(lead: dict) -> str:
         </td>
       </tr>
       <tr><td style="padding:44px 48px;">
-
         <p style="margin:0 0 16px;color:#1a1a2e;font-size:18px;font-weight:700;">Contact Information</p>
         <table width="100%" cellpadding="0" cellspacing="0"
                style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-bottom:32px;">
           {row("Full Name","name")}{row("Email Address","email")}{row("Phone Number","phone")}
           {row("Location","location")}{row("Lead ID","lead_id")}{row("Captured At","saved_at")}
         </table>
-
         <p style="margin:0 0 16px;color:#1a1a2e;font-size:18px;font-weight:700;">Care Needs</p>
         <table width="100%" cellpadding="0" cellspacing="0"
                style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-bottom:32px;">
           {row("Care Need","care_need")}{row("Care Type","care_type")}
           {row("Care Hours","care_hours")}{row("Insurance","insurance")}{row("Budget","budget")}
         </table>
-
         <p style="margin:0 0 16px;color:#1a1a2e;font-size:18px;font-weight:700;">Personal Details</p>
         <table width="100%" cellpadding="0" cellspacing="0"
                style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-bottom:32px;">
           {row("Age","age")}{row("Gender","gender")}
           {row("Living Arrangement","living_arrangement")}{row("Physician","physician")}
         </table>
-
         <p style="margin:0 0 16px;color:#1a1a2e;font-size:18px;font-weight:700;">Medical History</p>
         <table width="100%" cellpadding="0" cellspacing="0"
                style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-bottom:32px;">
           {row("Conditions","conditions")}{row("Hospitalizations","hospitalizations")}
           {row("Medications","medications")}{row("Allergies","allergies")}
         </table>
-
         <p style="margin:0 0 16px;color:#1a1a2e;font-size:18px;font-weight:700;">Additional Info</p>
         <table width="100%" cellpadding="0" cellspacing="0"
                style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-bottom:32px;">
@@ -133,10 +126,8 @@ def _build_html_email(lead: dict) -> str:
           {row("Transportation","transportation")}{row("Other Factors","other_factors")}
           {row("Notes","notes")}
         </table>
-
         <p style="margin:0;color:#555;font-size:14px;line-height:1.8;">
           This lead was captured automatically via the Infomary AI assistant.
-          Please review and follow up at your earliest convenience.
         </p>
       </td></tr>
       <tr>
@@ -150,26 +141,23 @@ def _build_html_email(lead: dict) -> str:
 </table>
 </body></html>"""
 
-# ─── Send Email ───────────────────────────────────────────────────────────────
 async def _send_email(lead: dict) -> dict:
-    logger.info("[Email] Sending notification...")
+    logger.info("Sending lead notification email")
     try:
         resend.api_key = os.getenv("RESEND_API_KEY")
         resend.Emails.send({
             "from": "InfoSenior.care <onboarding@resend.dev>",
             "to": "uzairlatif293@gmail.com",
-            "subject": f"🔔 New Lead: {lead.get('name','Unknown')} | {lead.get('care_need','N/A')} | {lead.get('location','N/A')}",
+            "subject": f"New Lead: {lead.get('name','Unknown')} | {lead.get('care_need','N/A')}",
             "html": _build_html_email(lead)
         })
-        logger.info("[Email] ✓ Sent")
         return {"success": True}
     except Exception as e:
-        logger.error(f"[Email] ✗ Failed: {e}")
+        logger.error(f"Email failed: {e}")
         return {"success": False, "error": str(e)}
 
-# ─── Upsert Sheet (UPDATE if exists, APPEND if new) ──────────────────────────
 async def _upsert_sheet(lead: dict, session_id: str) -> dict:
-    logger.info(f"[Sheet] Upserting — session={session_id} lead_id={lead['lead_id']}")
+    logger.info(f"Upserting sheet row for session {session_id}")
     try:
         loop = asyncio.get_event_loop()
 
@@ -204,25 +192,18 @@ async def _upsert_sheet(lead: dict, session_id: str) -> dict:
             existing_row = _sessions[session_id].get("row_index")
 
             if existing_row:
-                # ✅ UPDATE same row — no duplicate
                 sheet.update(f"A{existing_row}:Y{existing_row}", [row_data])
-                logger.info(f"[Sheet] ✓ Updated row {existing_row}")
             else:
-                # ✅ First time — APPEND and remember row index
                 sheet.append_row(row_data)
                 col_a = sheet.col_values(1)
-                row_index = len(col_a)
-                _sessions[session_id]["row_index"] = row_index
-                logger.info(f"[Sheet] ✓ Appended at row {row_index}")
+                _sessions[session_id]["row_index"] = len(col_a)
 
         await loop.run_in_executor(None, _run)
         return {"success": True}
-
     except Exception as e:
-        logger.error(f"[Sheet] ✗ Error: {e}")
+        logger.error(f"Sheet error: {e}")
         return {"success": False, "error": str(e)}
 
-# ─── Main Save Lead ───────────────────────────────────────────────────────────
 async def _save_lead(
     session_id: str = "",
     name: str = "", email: str = "", phone: str = "",
@@ -235,14 +216,12 @@ async def _save_lead(
     other_factors: str = "", transportation: str = "",
 ) -> str:
 
-    # ── Init session first time ──────────────────────────────────────────────
     if session_id not in _sessions:
         _sessions[session_id] = {
             "lead_id": str(uuid.uuid4())[:8].upper(),
             "row_index": None,
             "email_sent": False
         }
-        logger.info(f"[Session] New session created: {session_id} → lead_id={_sessions[session_id]['lead_id']}")
 
     session    = _sessions[session_id]
     lead_id    = session["lead_id"]
@@ -267,10 +246,9 @@ async def _save_lead(
         "transportation": transportation,
     }
 
-    # ── Always upsert sheet ──────────────────────────────────────────────────
     await _upsert_sheet(lead, session_id)
 
-    # ── Email: ONCE only, when name + (phone OR email) present ──────────────
+    # Trigger email once when enough contact info is present
     has_name    = bool(name.strip())
     has_contact = bool(phone.strip() or email.strip())
 
@@ -278,17 +256,10 @@ async def _save_lead(
         result = await _send_email(lead)
         if result["success"]:
             _sessions[session_id]["email_sent"] = True
-            logger.info("[Email] ✓ Triggered — will not fire again this session")
-    elif email_sent:
-        logger.info("[Email] Already sent — skipping")
-    else:
-        logger.info(f"[Email] Waiting — name={has_name} contact={has_contact}")
 
     return f"Lead saved. ID: {lead_id}"
 
-# ─── Google Search ────────────────────────────────────────────────────────────
 async def _google_search(query: str) -> str:
-    logger.info(f"[Search] {query}")
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -310,23 +281,16 @@ async def _google_search(query: str) -> str:
     except Exception as e:
         return f"Search failed: {e}"
 
-# ─── Tool Definitions ─────────────────────────────────────────────────────────
 google_search = StructuredTool.from_function(
     coroutine=_google_search,
     name="google_search",
-    description="Search for nearby senior care facilities, hospitals, or services based on location and care need.",
+    description="Search for nearby senior care facilities, hospitals, or services.",
     args_schema=GoogleSearchInput,
 )
 
 save_lead = StructuredTool.from_function(
     coroutine=_save_lead,
     name="save_lead",
-    description=(
-        "Save or UPDATE the senior care lead progressively. "
-        "Call this EVERY TIME any new information is learned from the user. "
-        "Always pass session_id (same every call) + ALL fields collected so far. "
-        "Sheet row is UPDATED in place — no duplicate rows. "
-        "Email fires ONCE automatically when name + (phone or email) are both present."
-    ),
+    description="Save or update senior care lead progressively. Pass session_id and all collected fields.",
     args_schema=SaveLeadInput,
 )
