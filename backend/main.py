@@ -522,6 +522,3 @@ class DeleteSessionRequest(BaseModel):
 async def delete_session_endpoint(req: DeleteSessionRequest):
     await delete_session(req.session_id)
     return {"status": "deleted"}
-
-
-
