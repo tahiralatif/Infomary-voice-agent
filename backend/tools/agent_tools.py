@@ -23,10 +23,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-# ─── In-Memory Session Tracker ────────────────────────────────────────────────
-# { session_id: { "lead_id": str, "row_index": int|None, "email_sent": bool } }
-_sessions: dict = {}
-
 # ─── Schemas ──────────────────────────────────────────────────────────────────
 class GoogleSearchInput(BaseModel):
     query: str
@@ -167,9 +163,9 @@ async def _send_email(lead: dict) -> dict:
         logger.error(f"[Email] ✗ Failed: {e}")
         return {"success": False, "error": str(e)}
 
-# ─── Upsert Sheet (UPDATE if exists, APPEND if new) ──────────────────────────
+# ─── Upsert Sheet (Stateful via Search) ──────────────────────────────────────
 async def _upsert_sheet(lead: dict, session_id: str) -> dict:
-    logger.info(f"[Sheet] Upserting — session={session_id} lead_id={lead['lead_id']}")
+    logger.info(f"[Sheet] Upserting — session={session_id}")
     try:
         loop = asyncio.get_event_loop()
 
@@ -185,8 +181,21 @@ async def _upsert_sheet(lead: dict, session_id: str) -> dict:
             client = gspread.authorize(creds)
             sheet = client.open_by_url(SHEET_URL).sheet1
 
+            # Search for existing session in Column Z (Index 26)
+            try:
+                cell = sheet.find(session_id, in_column=26)
+                existing_row = cell.row
+                # Get existing lead_id and email status from that row
+                row_vals = sheet.row_values(existing_row)
+                existing_lead_id = row_vals[0] if len(row_vals) > 0 else lead["lead_id"]
+                email_already_sent = row_vals[26] == "TRUE" if len(row_vals) > 26 else False
+            except gspread.exceptions.CellNotFound:
+                existing_row = None
+                existing_lead_id = lead["lead_id"]
+                email_already_sent = False
+
             row_data = [
-                lead.get("lead_id",""),      lead.get("name",""),
+                existing_lead_id,             lead.get("name",""),
                 lead.get("email",""),         lead.get("phone",""),
                 lead.get("care_need",""),     lead.get("location",""),
                 lead.get("status","New"),     lead.get("notes",""),
@@ -199,24 +208,21 @@ async def _upsert_sheet(lead: dict, session_id: str) -> dict:
                 lead.get("budget",""),        lead.get("home_hazards",""),
                 lead.get("medical_equipment",""), lead.get("other_factors",""),
                 lead.get("transportation",""),
+                session_id,                   # Column Z (26)
+                "TRUE" if lead.get("trigger_email") or email_already_sent else "FALSE" # Column AA (27)
             ]
 
-            existing_row = _sessions[session_id].get("row_index")
-
             if existing_row:
-                # ✅ UPDATE same row — no duplicate
-                sheet.update(f"A{existing_row}:Y{existing_row}", [row_data])
+                sheet.update(f"A{existing_row}:AA{existing_row}", [row_data])
                 logger.info(f"[Sheet] ✓ Updated row {existing_row}")
             else:
-                # ✅ First time — APPEND and remember row index
                 sheet.append_row(row_data)
-                col_a = sheet.col_values(1)
-                row_index = len(col_a)
-                _sessions[session_id]["row_index"] = row_index
-                logger.info(f"[Sheet] ✓ Appended at row {row_index}")
+                logger.info(f"[Sheet] ✓ Appended new row")
+            
+            return {"existing_lead_id": existing_lead_id, "email_already_sent": email_already_sent}
 
-        await loop.run_in_executor(None, _run)
-        return {"success": True}
+        result = await loop.run_in_executor(None, _run)
+        return {"success": True, **result}
 
     except Exception as e:
         logger.error(f"[Sheet] ✗ Error: {e}")
@@ -235,21 +241,11 @@ async def _save_lead(
     other_factors: str = "", transportation: str = "",
 ) -> str:
 
-    # ── Init session first time ──────────────────────────────────────────────
-    if session_id not in _sessions:
-        _sessions[session_id] = {
-            "lead_id": str(uuid.uuid4())[:8].upper(),
-            "row_index": None,
-            "email_sent": False
-        }
-        logger.info(f"[Session] New session created: {session_id} → lead_id={_sessions[session_id]['lead_id']}")
-
-    session    = _sessions[session_id]
-    lead_id    = session["lead_id"]
-    email_sent = session["email_sent"]
+    if not session_id:
+        return "Error: session_id is required for save_lead."
 
     lead = {
-        "lead_id": lead_id,
+        "lead_id": str(uuid.uuid4())[:8].upper(), # Default, will be overridden if exists
         "name": name, "email": email, "phone": phone,
         "care_need": care_need, "location": location,
         "status": "New", "notes": notes,
@@ -267,24 +263,30 @@ async def _save_lead(
         "transportation": transportation,
     }
 
-    # ── Always upsert sheet ──────────────────────────────────────────────────
-    await _upsert_sheet(lead, session_id)
-
-    # ── Email: ONCE only, when name + (phone OR email) present ──────────────
+    # ── Email Trigger Logic ──────────────────────────────────────────────────
     has_name    = bool(name.strip())
     has_contact = bool(phone.strip() or email.strip())
+    
+    # ── Always upsert sheet first to check status ───────────────────────────
+    upsert_res = await _upsert_sheet(lead, session_id)
+    
+    if not upsert_res["success"]:
+        return f"Partial failure: {upsert_res.get('error')}"
+
+    lead_id = upsert_res["existing_lead_id"]
+    email_sent = upsert_res["email_already_sent"]
 
     if has_name and has_contact and not email_sent:
-        result = await _send_email(lead)
-        if result["success"]:
-            _sessions[session_id]["email_sent"] = True
-            logger.info("[Email] ✓ Triggered — will not fire again this session")
-    elif email_sent:
-        logger.info("[Email] Already sent — skipping")
-    else:
-        logger.info(f"[Email] Waiting — name={has_name} contact={has_contact}")
-
-    return f"Lead saved. ID: {lead_id}"
+        # Update lead dict for email with the correct ID
+        lead["lead_id"] = lead_id
+        email_res = await _send_email(lead)
+        if email_res["success"]:
+            # Mark as sent in sheet
+            lead["trigger_email"] = True
+            await _upsert_sheet(lead, session_id)
+            logger.info("[Email] ✓ Triggered and recorded")
+    
+    return f"Lead processed. ID: {lead_id}"
 
 # ─── Google Search ────────────────────────────────────────────────────────────
 async def _google_search(query: str) -> str:
@@ -298,7 +300,7 @@ async def _google_search(query: str) -> str:
                     "Content-Type": "application/json"
                 },
                 json={"q": query, "num": 5},
-                timeout=10.0
+                timeout=20.0 # Increased for production stability
             )
             organic = response.json().get("organic", [])
             if not organic:
@@ -308,6 +310,7 @@ async def _google_search(query: str) -> str:
                 for r in organic[:5]
             )
     except Exception as e:
+        logger.error(f"[Search] ✗ Failed: {e}")
         return f"Search failed: {e}"
 
 # ─── Tool Definitions ─────────────────────────────────────────────────────────
@@ -325,7 +328,7 @@ save_lead = StructuredTool.from_function(
         "Save or UPDATE the senior care lead progressively. "
         "Call this EVERY TIME any new information is learned from the user. "
         "Always pass session_id (same every call) + ALL fields collected so far. "
-        "Sheet row is UPDATED in place — no duplicate rows. "
+        "Sheet row is UPDATED in place using session_id — no duplicate rows even in deployment. "
         "Email fires ONCE automatically when name + (phone or email) are both present."
     ),
     args_schema=SaveLeadInput,
