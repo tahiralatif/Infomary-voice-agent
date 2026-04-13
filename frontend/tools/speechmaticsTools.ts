@@ -16,10 +16,11 @@ export const speechmaticsTools = [
     type: "function",
     function: {
       name: "save_lead",
-      description: "Save the senior care lead to Google Sheet and send email notification to the team. Call this when user says save it or that's all or after collecting enough information.",
+      description: "Save or update the senior care lead info progressively. Pass the session_id and all other collected fields.",
       parameters: {
         type: "object",
         properties: {
+          session_id: { type: "string", description: "The session ID for the current conversation." },
           name: { type: "string" }, email: { type: "string" },
           phone: { type: "string" }, care_need: { type: "string" },
           location: { type: "string" }, notes: { type: "string" },
@@ -31,7 +32,8 @@ export const speechmaticsTools = [
           insurance: { type: "string" }, budget: { type: "string" },
           home_hazards: { type: "string" }, medical_equipment: { type: "string" },
           other_factors: { type: "string" }, transportation: { type: "string" }
-        }
+        },
+        required: ["session_id"]
       }
     }
   },

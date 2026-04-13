@@ -45,6 +45,8 @@ function ChatPageInner() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const [wsConnected, setWsConnected] = useState(false)
 
   const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = crypto.randomUUID()
@@ -56,7 +58,8 @@ function ChatPageInner() {
 
   const loadSessions = useCallback(async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/sessions`)
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const res = await fetch(`${backendUrl}/sessions`)
       const data = await res.json()
       setSessions(data.sessions || [])
     } catch (error) {
@@ -67,7 +70,8 @@ function ChatPageInner() {
 
   const generateTitle = useCallback(async (sid: string, userMsg: string, aiMsg: string) => {
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/generate-title`, {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      await fetch(`${backendUrl}/generate-title`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sid, user_message: userMsg, ai_response: aiMsg })
@@ -81,7 +85,8 @@ function ChatPageInner() {
   const loadHistory = useCallback(async (sid: string) => {
     setLoadingHistory(true)
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/history/${sid}`)
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const res = await fetch(`${backendUrl}/history/${sid}`)
       const data = await res.json()
 
       if (data.messages && data.messages.length > 0) {
@@ -112,6 +117,44 @@ function ChatPageInner() {
     }
   }, [addToast, generateTitle])
 
+  const connectWebSocket = useCallback((sid: string) => {
+  
+  if (wsRef.current) {
+    wsRef.current.close()
+  }
+
+  const wsUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000')
+    .replace('https://', 'wss://')
+    .replace('http://', 'ws://')
+
+  const ws = new WebSocket(`${wsUrl}/ws/${sid}`)
+
+  ws.onopen = () => {
+    setWsConnected(true)
+    console.log('[WS] Connected')
+  }
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data)
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: data.response
+    }])
+    setLoading(false)
+  }
+
+  ws.onerror = () => {
+    addToast('Connection error — retrying...', 'error')
+    setWsConnected(false)
+  }
+
+  ws.onclose = () => {
+    setWsConnected(false)
+  }
+
+  wsRef.current = ws
+}, [addToast])
+
   // Load sessions on mount
   useEffect(() => {
     loadSessions()
@@ -139,11 +182,12 @@ function ChatPageInner() {
   const startNewChat = useCallback(() => {
     const newSessionId = generateSessionId()
     setSessionId(newSessionId)
+    titleGeneratedRef.current = false  
+    setTitleGenerated(false)
     setMessages([{
       role: 'assistant',
       content: "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?"
     }])
-    setTitleGenerated(false)
     router.push(`/chat?session=${newSessionId}`)
     loadSessions()
     setIsSidebarOpen(false)
@@ -152,6 +196,7 @@ function ChatPageInner() {
 
   const loadSession = useCallback((sid: string) => {
     setSessionId(sid)
+    titleGeneratedRef.current = false
     setTitleGenerated(false)
     loadHistory(sid)
     router.push(`/chat?session=${sid}`)
@@ -166,7 +211,8 @@ function ChatPageInner() {
   const handleDeleteConfirm = async () => {
     if (!deleteConfirm) return
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/delete-session`, {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      await fetch(`${backendUrl}/delete-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: deleteConfirm })
@@ -188,41 +234,52 @@ function ChatPageInner() {
   const handleDeleteCancel = () => setDeleteConfirm(null)
 
   useEffect(() => {
+    if (sessionId) connectWebSocket(sessionId)
+    return () => { wsRef.current?.close() }
+  }, [sessionId, connectWebSocket])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  const titleGeneratedRef = useRef(false)
 
   const sendMessage = async () => {
     if (!input.trim() || loading || !sessionId) return
 
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      addToast('Connecting...', 'info')
+      connectWebSocket(sessionId)
+      setTimeout(() => sendMessage(), 800)
+      return
+    }
+
     const userMessage: Message = { role: 'user', content: input }
-    const currentMessages = [...messages, userMessage]
-    setMessages(currentMessages)
+    setMessages(prev => [...prev, userMessage])
+    const currentInput = input
     setInput('')
     setLoading(true)
 
-    try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input, history: messages, session_id: sessionId })
-      })
-      const data = await res.json()
-      const assistantMessage: Message = { role: 'assistant', content: data.response }
-      setMessages(prev => [...prev, assistantMessage])
+    
+    const shouldGenerateTitle = !titleGeneratedRef.current
 
-      if (!titleGenerated && currentMessages.length >= 2) {
-        generateTitle(sessionId, input, data.response)
-        setTitleGenerated(true)
-      }
-    } catch {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: "I'm sorry, something went wrong. Please try again."
-      }])
-      addToast('Failed to send message', 'error')
-    } finally {
+    wsRef.current.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      setMessages(prev => [...prev, { role: 'assistant', content: data.response }])
       setLoading(false)
+
+      if (shouldGenerateTitle) {
+        titleGeneratedRef.current = true
+        setTitleGenerated(true)
+        generateTitle(sessionId, currentInput, data.response)
+        loadSessions()
+      }
     }
+
+    wsRef.current.send(JSON.stringify({
+      message: currentInput,
+      history: messages,
+    }))
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

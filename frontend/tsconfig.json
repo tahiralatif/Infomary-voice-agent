@@ -35,7 +35,7 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "**/*.mts"
-  ],
+, "app/utils/auth.jsx", "app/components/VoiceAssistantModel.jsx", "tools/EndConversation.js"  ],
   "exclude": [
     "node_modules"
   ]
