@@ -13,6 +13,7 @@
     "@speechmatics/browser-audio-input": "^2.0.3",
     "@speechmatics/flow-client": "^0.2.2",
     "@speechmatics/web-pcm-player": "^1.0.0",
+    "@splinetool/react-spline": "^4.1.0",
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/auth-ui-react": "^0.4.7",
     "@supabase/auth-ui-shared": "^0.1.8",

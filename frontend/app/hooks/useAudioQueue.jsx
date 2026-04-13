@@ -1,5 +1,15 @@
 import { useRef } from "react";
 
+function convertPCM16ToFloat32(arrayBuffer) {
+  const view = new DataView(arrayBuffer);
+  const float32 = new Float32Array(arrayBuffer.byteLength / 2);
+  for (let i = 0; i < float32.length; i++) {
+    const int16 = view.getInt16(i * 2, true);
+    float32[i] = int16 / 0x8000;
+  }
+  return float32;
+}
+
 function useAudioQueue() {
   const audioCtxRef = useRef(null);
   const sourceRef = useRef(null);
@@ -7,7 +17,7 @@ function useAudioQueue() {
   const startTimeRef = useRef(0);
   const isPlayingRef = useRef(false);
 
-  const MIN_BUFFER_SIZE = 16000 * 0.5;
+  const MIN_BUFFER_SIZE = 16000 * 0.6;
   // Initialize AudioContext on user interaction
   const initAudioContext = () => {
     if (!audioCtxRef.current) {
@@ -43,7 +53,7 @@ function useAudioQueue() {
     const audioBuffer = ctx.createBuffer(1, samplesToPlay, 16000);
     audioBuffer.copyToChannel(
       new Float32Array(bufferRef.current.slice(0, samplesToPlay)),
-      0
+      0,
     );
 
     // Clear buffer for new data
@@ -78,14 +88,5 @@ function useAudioQueue() {
 
   return { playChunk };
 } // PCM converter helper
-function convertPCM16ToFloat32(arrayBuffer) {
-  const view = new DataView(arrayBuffer);
-  const float32 = new Float32Array(arrayBuffer.byteLength / 2);
-  for (let i = 0; i < float32.length; i++) {
-    const int16 = view.getInt16(i * 2, true);
-    float32[i] = int16 / 0x8000;
-  }
-  return float32;
-}
 
 export default useAudioQueue;

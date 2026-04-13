@@ -20,7 +20,7 @@ class PCMProcessor extends AudioWorkletProcessor {
       this.buffer = newBuffer;
 
       // Process in 30ms frames (480 samples @ 16kHz)
-      const frameSize = 480; // 16000 * 0.03 = 480 samples
+      const frameSize = 960; // 16000 * 0.03 = 480 samples
 
       while (this.buffer.length >= frameSize) {
         // Extract one frame

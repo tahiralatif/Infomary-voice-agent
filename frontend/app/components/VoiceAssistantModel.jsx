@@ -1,5 +1,5 @@
 import Spline from "@splinetool/react-spline";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 
 function useResponsiveStyles() {
   const [style, setStyle] = useState({ width: "80%", height: "70vh" });
@@ -28,27 +28,13 @@ function useResponsiveStyles() {
   return style;
 }
 
-export default function VoiceAssistantModel({ isSpeaking }) {
+export default function VoiceAssistantModel() {
   const style = useResponsiveStyles();
-  const videoRef = useRef(null);
-
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.src = isSpeaking ? "/avatar.mp4" : "/avatar-silent.mp4";
-      videoRef.current.play();
-    }
-  }, [isSpeaking]);
 
   return (
-    <video
-      ref={videoRef}
+    <Spline
       style={style}
-      src="/avatar-silent.mp4"
-      autoPlay
-      loop
-      muted
-      playsInline
+      scene="https://prod.spline.design/Jk4XxrRtpPJPLnlF/scene.splinecode"
     />
   );
 }
- 

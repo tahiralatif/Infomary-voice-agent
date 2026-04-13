@@ -118,42 +118,42 @@ function ChatPageInner() {
   }, [addToast, generateTitle])
 
   const connectWebSocket = useCallback((sid: string) => {
-  
-  if (wsRef.current) {
-    wsRef.current.close()
-  }
 
-  const wsUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000')
-    .replace('https://', 'wss://')
-    .replace('http://', 'ws://')
+    if (wsRef.current) {
+      wsRef.current.close()
+    }
 
-  const ws = new WebSocket(`${wsUrl}/ws/${sid}`)
+    const wsUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000')
+      .replace('https://', 'wss://')
+      .replace('http://', 'ws://')
 
-  ws.onopen = () => {
-    setWsConnected(true)
-    console.log('[WS] Connected')
-  }
+    const ws = new WebSocket(`${wsUrl}/ws/${sid}`)
 
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data)
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      content: data.response
-    }])
-    setLoading(false)
-  }
+    ws.onopen = () => {
+      setWsConnected(true)
+      console.log('[WS] Connected')
+    }
 
-  ws.onerror = () => {
-    addToast('Connection error — retrying...', 'error')
-    setWsConnected(false)
-  }
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.response
+      }])
+      setLoading(false)
+    }
 
-  ws.onclose = () => {
-    setWsConnected(false)
-  }
+    ws.onerror = () => {
+      addToast('Connection error — retrying...', 'error')
+      setWsConnected(false)
+    }
 
-  wsRef.current = ws
-}, [addToast])
+    ws.onclose = () => {
+      setWsConnected(false)
+    }
+
+    wsRef.current = ws
+  }, [addToast])
 
   // Load sessions on mount
   useEffect(() => {
@@ -182,7 +182,7 @@ function ChatPageInner() {
   const startNewChat = useCallback(() => {
     const newSessionId = generateSessionId()
     setSessionId(newSessionId)
-    titleGeneratedRef.current = false  
+    titleGeneratedRef.current = false
     setTitleGenerated(false)
     setMessages([{
       role: 'assistant',
@@ -260,7 +260,7 @@ function ChatPageInner() {
     setInput('')
     setLoading(true)
 
-    
+
     const shouldGenerateTitle = !titleGeneratedRef.current
 
     wsRef.current.onmessage = (event) => {
@@ -307,11 +307,10 @@ function ChatPageInner() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-slide-in ${
-              toast.type === 'success' ? 'bg-green-600 text-white' :
-              toast.type === 'error' ? 'bg-red-600 text-white' :
-              'bg-blue-600 text-white'
-            }`}
+            className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-slide-in ${toast.type === 'success' ? 'bg-green-600 text-white' :
+                toast.type === 'error' ? 'bg-red-600 text-white' :
+                  'bg-blue-600 text-white'
+              }`}
           >
             {toast.message}
           </div>
@@ -347,7 +346,7 @@ function ChatPageInner() {
 
       {/* Sidebar Overlay (Mobile) */}
       {isSidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
@@ -364,7 +363,7 @@ function ChatPageInner() {
             <h2 className="text-base font-bold text-blue-400">InfoMary</h2>
             <p className="text-[10px] text-gray-500 lg:mb-3">Senior Care Navigation</p>
           </div>
-          <button 
+          <button
             onClick={() => setIsSidebarOpen(false)}
             className="p-2 text-gray-400 hover:text-white lg:hidden"
           >
@@ -382,9 +381,8 @@ function ChatPageInner() {
             {sessions.map((session) => (
               <div
                 key={session.session_id}
-                className={`group relative rounded-lg transition-colors ${
-                  sessionId === session.session_id ? 'bg-gray-800 border-l-2 border-blue-500' : 'hover:bg-gray-800'
-                }`}
+                className={`group relative rounded-lg transition-colors ${sessionId === session.session_id ? 'bg-gray-800 border-l-2 border-blue-500' : 'hover:bg-gray-800'
+                  }`}
               >
                 <button onClick={() => loadSession(session.session_id)} className="w-full text-left p-3 pr-8">
                   <div className="text-sm font-medium text-gray-200 truncate">{session.title}</div>
@@ -423,7 +421,7 @@ function ChatPageInner() {
       <div className="flex-1 flex flex-col h-full min-w-0">
         {/* Header */}
         <div className="bg-gray-900 border-b border-gray-800 p-3 lg:p-4 flex items-center gap-3">
-          <button 
+          <button
             onClick={() => setIsSidebarOpen(true)}
             className="p-2 text-gray-400 hover:text-white lg:hidden flex-shrink-0"
           >
@@ -456,9 +454,8 @@ function ChatPageInner() {
                       🩺
                     </div>
                   )}
-                  <div className={`max-w-[85%] lg:max-w-2xl px-3 py-2 lg:px-4 lg:py-3 rounded-2xl text-xs lg:text-sm leading-relaxed shadow-sm ${
-                    msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-gray-800 text-gray-100 rounded-tl-sm border border-gray-700/50'
-                  }`}>
+                  <div className={`max-w-[85%] lg:max-w-2xl px-3 py-2 lg:px-4 lg:py-3 rounded-2xl text-xs lg:text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-gray-800 text-gray-100 rounded-tl-sm border border-gray-700/50'
+                    }`}>
                     {msg.role === 'assistant' ? (
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}

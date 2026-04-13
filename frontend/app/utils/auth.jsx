@@ -1,7 +1,7 @@
 import { createSpeechmaticsJWT } from "@speechmatics/auth";
 
 export async function getJWT() {
-  const apiKey = import.meta.env.VITE_SPEECHMATICS_API_KEY;
+  const apiKey = process.env.NEXT_PUBLIC_SPEECHMATICS_API_KEY;
   if (!apiKey) {
     throw new Error("Please set the API_KEY environment variable");
   }
