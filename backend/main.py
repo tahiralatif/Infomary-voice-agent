@@ -399,6 +399,49 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         logger.error(f"[WS] Error: {e}")
         await websocket.send_json({"response": "Something went wrong."})
 
+# ─── REST Chat Endpoint (for text agent) ──────────────────────
+class ChatRequest(BaseModel):
+    message: str
+    history: list = []
+    session_id: str = ""
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    messages = [SystemMessage(content=system_prompt)]
+    for msg in req.history:
+        if msg["role"] == "user":
+            messages.append(HumanMessage(content=msg["content"]))
+        elif msg["role"] == "assistant":
+            messages.append(AIMessage(content=msg["content"]))
+    messages.append(HumanMessage(content=req.message))
+
+    max_iterations = 5
+    response = None
+    for _ in range(max_iterations):
+        response = await llm.ainvoke(messages)
+        if hasattr(response, 'tool_calls') and response.tool_calls:
+            messages.append(response)
+            for tc in response.tool_calls:
+                try:
+                    if tc["name"] == "google_search":
+                        result = await google_search.ainvoke(tc["args"])
+                    elif tc["name"] == "save_lead":
+                        result = await save_lead.ainvoke(tc["args"])
+                    else:
+                        result = f"Unknown tool: {tc['name']}"
+                    messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+                except Exception as e:
+                    messages.append(ToolMessage(content=f"Error: {e}", tool_call_id=tc["id"]))
+        else:
+            break
+
+    output = response.content if response else "I'm sorry, something went wrong."
+    if req.session_id:
+        await save_message(req.session_id, "user", req.message)
+        await save_message(req.session_id, "assistant", output)
+
+    return {"response": output}
+
 # ─── Voice Agent Tools ─────────────────────────────────────────
 class SpeechmaticsToolCall(BaseModel):
     tool_name: str

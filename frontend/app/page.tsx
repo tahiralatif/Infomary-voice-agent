@@ -1,394 +1,590 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { createSpeechmaticsJWT } from '@speechmatics/auth'
-import { speechmaticsTools } from '../tools/speechmaticsTools'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import Image from 'next/image'
+import { useState, useEffect } from 'react'
 
-const TEMPLATE_ID = '0976156d-9e20-46b7-be7d-3371ff6ae24f:latest'
+const services = [
+  { icon: '🏠', title: 'In-Home Care', desc: 'Personalized daily assistance so your loved one can stay safely at home.' },
+  { icon: '🧠', title: 'Memory Care', desc: "Expert support for Alzheimer's, dementia, and cognitive decline." },
+  { icon: '🏥', title: 'Assisted Living', desc: 'Warm, supervised communities with 24/7 professional support.' },
+  { icon: '💊', title: 'Skilled Nursing', desc: 'Licensed medical care, wound care, and post-hospital rehabilitation.' },
+  { icon: '🤝', title: 'Companion Care', desc: 'Meaningful social engagement to combat isolation and loneliness.' },
+  { icon: '🚗', title: 'Transportation', desc: 'Reliable, safe rides to appointments, errands, and activities.' },
+]
 
+const testimonials = [
+  { name: 'Margaret T.', location: 'Chicago, IL', text: 'Infomary helped us find the perfect memory care facility for my father within 20 minutes. I was overwhelmed before — now I feel at peace.', avatar: 'MT' },
+  { name: 'Robert & Linda K.', location: 'Houston, TX', text: 'We had no idea where to start. The AI asked the right questions and matched us with exactly what my mother needed. Incredible service.', avatar: 'RK' },
+  { name: 'Sarah M.', location: 'Phoenix, AZ', text: 'As a nurse, I was skeptical. But Infomary gave genuinely helpful, accurate guidance. I now recommend it to families I work with.', avatar: 'SM' },
+]
 
-function stripToolXML(text: string): string {
-  let result = text
+const faqs = [
+  { q: 'Is InfoSenior.care free to use?', a: 'Yes, completely free for families. We are funded by our network of care facilities.' },
+  { q: 'How does Infomary find the right care?', a: 'Infomary asks about your loved one\'s needs, location, and budget, then matches you with verified facilities.' },
+  { q: 'Is my information private?', a: 'Absolutely. We follow HIPAA-ready practices and never sell your personal data.' },
+  { q: 'What states do you cover?', a: 'We currently serve families across all 50 US states with a growing network of 10,000+ facilities.' },
+]
 
-  
-  result = result.replace(/<FUNCTION[\s\S]*?(?:<\/FUNCTION>|(?<=\S)\s*\/>|\/>)/gi, '')
-
-  
-  result = result.replace(/<FUNCTION\b[^]*$/gi, '')
-  result = result.replace(/<RESULT[\s\S]*?<\/RESULT>/gi, '')
-  result = result.replace(/<APPLICATION_INPUT[\s\S]*?<\/APPLICATION_INPUT>/gi, '')
-  result = result.replace(/<tool_call[\s\S]*?<\/tool_call>/gi, '')
-  result = result.replace(/<tool_result[\s\S]*?<\/tool_result>/gi, '')
-
-  
-  result = result.replace(/\b\w+="[^"]*"/g, '')
-
-  
-  result = result.replace(/\s+/g, ' ').trim()
-
-  return result
-}
-
-export default function VoiceAgent() {
-  const webSocketRef = useRef<WebSocket | null>(null)
-  const [connected, setConnected] = useState(false)
-  const [sessionId] = useState(() => `voice_${Math.random().toString(36).substring(7)}`)
-  const [speaking, setSpeaking] = useState<'user' | 'agent' | null>(null)
-  const [transcript, setTranscript] = useState<{role: string, text: string, promptId?: string}[]>([])
-  const [partial, setPartial] = useState<string | null>(null)
-  const audioCtxRef = useRef<AudioContext | null>(null)
-  const bufferRef = useRef<number[]>([])
-  const startTimeRef = useRef(0)
-  const isPlayingRef = useRef(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+export default function Home() {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [openFaq, setOpenFaq] = useState<number | null>(null)
+  const [form, setForm] = useState({ name: '', email: '', phone: '', message: '' })
+  const [submitted, setSubmitted] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [transcript])
-
-  // ─── Audio Playback ───
-  const playChunk = (arrayBuffer: ArrayBuffer) => {
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new AudioContext()
-    }
-    const ctx = audioCtxRef.current
-    const view = new DataView(arrayBuffer)
-    const float32 = new Float32Array(arrayBuffer.byteLength / 2)
-    for (let i = 0; i < float32.length; i++) {
-      float32[i] = view.getInt16(i * 2, true) / 0x8000
-    }
-    bufferRef.current.push(...Array.from(float32))
-    if (!isPlayingRef.current && bufferRef.current.length >= 8000) {
-      startPlayback(ctx)
-    }
-  }
-
-  const startPlayback = (ctx: AudioContext) => {
-    if (bufferRef.current.length === 0) return
-    isPlayingRef.current = true
-    const samples = Math.min(bufferRef.current.length, 32000)
-    const audioBuffer = ctx.createBuffer(1, samples, 16000)
-    audioBuffer.copyToChannel(new Float32Array(bufferRef.current.slice(0, samples)), 0)
-    bufferRef.current = bufferRef.current.slice(samples)
-    const source = ctx.createBufferSource()
-    source.buffer = audioBuffer
-    source.connect(ctx.destination)
-    if (startTimeRef.current === 0) startTimeRef.current = ctx.currentTime
-    source.start(startTimeRef.current)
-    startTimeRef.current += audioBuffer.duration
-    source.onended = () => {
-      if (bufferRef.current.length >= 8000) {
-        startPlayback(ctx)
-      } else {
-        isPlayingRef.current = false
-        startTimeRef.current = 0
-        setSpeaking(null)
-      }
-    }
-  }
-
-  // ─── Connect to Speechmatics ───
-  const connectToSpeechmatics = async () => {
-    try {
-      const apiKey = process.env.NEXT_PUBLIC_SPEECHMATICS_API_KEY!
-      const jwt = await createSpeechmaticsJWT({ type: 'flow', apiKey, ttl: 3600 })
-      
-      const ws = new WebSocket(`wss://flow.api.speechmatics.com/v1/flow?jwt=${jwt}`)
-      webSocketRef.current = ws
-      ws.binaryType = 'arraybuffer'
-
-      ws.onopen = async () => {
-        console.log('✅ Connected to Speechmatics!')
-        setConnected(true)
-
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000 } })
-        const audioContext = new AudioContext({ sampleRate: 16000 })
-        await audioContext.audioWorklet.addModule('/pcm-processor.js')
-        const source = audioContext.createMediaStreamSource(stream)
-        const processor = new AudioWorkletNode(audioContext, 'pcm-processor')
-
-        processor.port.onmessage = (event) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(new Float32Array(event.data.float32Data).buffer)
-          }
-        }
-
-        source.connect(processor)
-        processor.connect(audioContext.destination)
-
-        ws.send(JSON.stringify({
-          message: 'StartConversation',
-          audio_format: { type: 'raw', encoding: 'pcm_f32le' },
-          conversation_config: {
-            template_id: TEMPLATE_ID,
-            template_variables: {
-              SESSION_ID: sessionId
-            }
-          },
-          tools: speechmaticsTools
-        }))
-      }
-
-      ws.onmessage = async (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          setSpeaking('agent')
-          playChunk(event.data)
-          return
-        }
-
-        const data = JSON.parse(event.data)
-
-        switch (data.message) {
-          case 'AddPartialTranscript': {
-            const text = data.metadata?.transcript?.replace(/<\/?S\d+>/gi, '').trim()
-            if (text) setPartial(text)
-            break
-          }
-
-          case 'AddTranscript': {
-            setPartial(null)
-            const finalText = data.metadata?.transcript?.replace(/<\/?S\d+>/gi, '').trim()
-            if (finalText) {
-              setSpeaking('user')
-              setTranscript(prev => {
-                const last = prev[prev.length - 1]
-                if (last && last.role === 'user' && !last.promptId) {
-                  return [...prev.slice(0, -1), { role: 'user', text: last.text + ' ' + finalText }]
-                }
-                return [...prev, { role: 'user', text: finalText }]
-              })
-            }
-            break
-          }
-
-          case 'prompt': {
-            const { id: promptId, response: rawResponse = '', prompt: rawPrompt = '' } = data.prompt
-
-            const agentText = stripToolXML(rawResponse)
-
-            
-            const hasResultXML = /<(RESULT|APPLICATION_INPUT)[\s\S]*?<\/\1>/i.test(rawPrompt)
-            if (!agentText || hasResultXML) break
-
-            setTranscript(prev => {
-              const existingIdx = prev.findIndex(m => m.promptId === promptId)
-              if (existingIdx !== -1) {
-                const updated = [...prev]
-                updated[existingIdx] = { ...updated[existingIdx], text: agentText }
-                return updated
-              }
-              return [...prev, { promptId, role: 'agent', text: agentText }]
-            })
-            break
-          }
-
-          case 'ToolInvoke': {
-            const toolId = data.id
-            const toolName = data.function.name
-            
-            const toolArgs = typeof data.function.arguments === 'string' 
-              ? JSON.parse(data.function.arguments) 
-              : data.function.arguments
-
-            console.log(`🔧 Tool call: ${toolName}`, toolArgs)
-
-            // Inject session_id if missing
-            if (toolName === 'save_lead' && !toolArgs.session_id) {
-              toolArgs.session_id = sessionId
-            }
-
-            if (toolName === 'end_conversation' || toolName === 'EndConversation') {
-              ws.send(JSON.stringify({ message: 'ToolResult', id: toolId, status: 'ok', content: 'Goodbye!' }))
-              setTimeout(() => { ws.close(); setConnected(false); setTranscript([]) }, 1000)
-              break
-            }
-
-            try {
-              const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-              const res = await fetch(`${backendUrl}/speechmatics-tools`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  tool_name: toolName,
-                  args: toolArgs
-                })
-              })
-
-              if (!res.ok) {
-                const errText = await res.text()
-                throw new Error(`HTTP ${res.status}: ${errText.slice(0, 100)}`)
-              }
-
-              const json = await res.json()
-              console.log('✅ Tool Result:', json)
-              ws.send(JSON.stringify({
-                message: 'ToolResult',
-                id: toolId,
-                status: json.error ? 'error' : 'ok',
-                content: json.result || json.error || 'Done'
-              }))
-            } catch (e) {
-              console.error('Tool call failed:', e)
-              ws.send(JSON.stringify({ message: 'ToolResult', id: toolId, status: 'error', content: 'Tool failed' }))
-            }
-            break
-          }
-
-          default:
-            if (data.message) console.log('[SM]', data.message, data.reason || '')
-            break
-        }
-      }
-
-      ws.onerror = (e) => console.error('WebSocket error:', e)
-      ws.onclose = () => { 
-        setConnected(false)
-        setSpeaking(null)
-        setPartial(null)
-      }
-
-    } catch (e) {
-      console.error('Connection failed:', e)
-    }
-  }
-
-  const disconnect = () => {
-    webSocketRef.current?.close()
-    setConnected(false)
-    setTranscript([])
-    setSpeaking(null)
-    setPartial(null)
-  }
+    const onScroll = () => setScrolled(window.scrollY > 20)
+    window.addEventListener('scroll', onScroll)
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
 
   return (
-    <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
+    <div className="min-h-screen bg-white text-gray-900 font-sans">
 
-      {/* Sidebar */}
-      <div className="w-52 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
-        <div className="p-4 border-b border-gray-800">
-          <h2 className="text-base font-bold text-blue-400">InfoMary</h2>
-          <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-0.5">Senior Care</p>
-        </div>
-        <div className="flex-1 p-3 space-y-1">
-          <Link href="/" className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-blue-600/10 text-blue-400 text-sm font-medium">
-            🎙️ Voice Agent
-          </Link>
-          <Link href="/chat" className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-gray-400 hover:bg-gray-800 text-sm transition-colors">
-            💬 Text Agent
-          </Link>
-        </div>
-      </div>
-
-      {/* Main */}
-      <div className="flex-1 flex flex-col min-w-0">
-
-        {/* Header */}
-        <div className="px-5 py-3.5 border-b border-gray-800 flex items-center justify-between shrink-0">
-          <div>
-            <h1 className="text-base font-bold text-blue-400">InfoSenior.care</h1>
-            <p className="text-[11px] text-gray-500">AI-Powered Senior Care Voice Assistant</p>
-          </div>
-          {connected && (
-            <div className="flex items-center gap-1.5 bg-green-900/20 px-2.5 py-1 rounded-full">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-[10px] text-green-400 font-semibold uppercase tracking-wide">Live</span>
+      {/* ── NAVBAR ── */}
+      <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? 'bg-white shadow-md py-3' : 'bg-transparent py-5'}`}>
+        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+              <span className="text-white text-sm font-bold">IS</span>
             </div>
-          )}
+            <span className={`text-xl font-bold transition-colors ${scrolled ? 'text-[#1e3a5f]' : 'text-white'}`}>
+              InfoSenior<span className="text-blue-400">.care</span>
+            </span>
+          </Link>
+
+          <div className="hidden lg:flex items-center gap-8">
+            {['Services', 'How It Works', 'About', 'Contact'].map(item => (
+              <a key={item} href={`#${item.toLowerCase().replace(' ', '-')}`}
+                className={`text-sm font-medium transition-colors hover:text-blue-400 ${scrolled ? 'text-gray-600' : 'text-white/90'}`}>
+                {item}
+              </a>
+            ))}
+          </div>
+
+          <div className="hidden lg:flex items-center gap-3">
+            <Link href="/chat" className={`text-sm font-medium px-4 py-2 rounded-lg transition-colors ${scrolled ? 'text-gray-600 hover:text-blue-600' : 'text-white/90 hover:text-white'}`}>
+              Text Chat
+            </Link>
+            <Link href="/voice" className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-all shadow-lg shadow-blue-600/30 hover:shadow-blue-600/50">
+              🎙️ Talk to Infomary
+            </Link>
+          </div>
+
+          <button onClick={() => setMenuOpen(!menuOpen)} className={`lg:hidden p-2 ${scrolled ? 'text-gray-700' : 'text-white'}`}>
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {menuOpen
+                ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
+            </svg>
+          </button>
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4">
-          <div className="max-w-2xl mx-auto space-y-3">
-
-            {transcript.length === 0 && !connected && (
-              <div className="flex flex-col items-center justify-center h-64 text-center opacity-40">
-                <div className="text-4xl mb-3">🎙️</div>
-                <p className="text-gray-400 text-sm">Press Start to begin</p>
-              </div>
-            )}
-
-            {transcript.map((t, i) => (
-              <div key={i} className={`flex items-end gap-2 ${t.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {t.role === 'agent' && (
-                  <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-xs shrink-0">🩺</div>
-                )}
-                <div className={`max-w-[72%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                  t.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-br-none'
-                    : 'bg-gray-800 text-gray-100 rounded-bl-none border border-gray-700'
-                }`}>
-                  {t.role === 'agent' ? (
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        p: ({ ...props }) => <p className="mb-1 last:mb-0" {...props} />,
-                        strong: ({ ...props }) => <strong className="font-semibold text-blue-300" {...props} />,
-                        ul: ({ ...props }) => <ul className="list-disc pl-4 mb-1" {...props} />,
-                        ol: ({ ...props }) => <ol className="list-decimal pl-4 mb-1" {...props} />,
-                        li: ({ ...props }) => <li className="mb-0.5" {...props} />,
-                        a: ({ ...props }) => <a className="text-blue-400 underline" target="_blank" rel="noreferrer" {...props} />,
-                      }}
-                    >
-                      {t.text}
-                    </ReactMarkdown>
-                  ) : t.text}
-                </div>
-                {t.role === 'user' && (
-                  <div className="w-7 h-7 rounded-full bg-blue-800 border border-blue-600 flex items-center justify-center text-xs shrink-0">👤</div>
-                )}
-              </div>
+        {menuOpen && (
+          <div className="lg:hidden bg-white border-t border-gray-100 px-6 py-4 space-y-1 shadow-lg">
+            {['Services', 'How It Works', 'About', 'Contact'].map(item => (
+              <a key={item} href={`#${item.toLowerCase().replace(' ', '-')}`}
+                onClick={() => setMenuOpen(false)}
+                className="block text-sm text-gray-700 py-2.5 border-b border-gray-50 hover:text-blue-600 transition-colors">
+                {item}
+              </a>
             ))}
+            <div className="pt-3 flex flex-col gap-2">
+              <Link href="/chat" className="text-center text-sm font-medium text-gray-600 border border-gray-200 py-2.5 rounded-lg">Text Chat</Link>
+              <Link href="/voice" className="text-center bg-blue-600 text-white text-sm font-semibold py-2.5 rounded-lg">🎙️ Talk to Infomary</Link>
+            </div>
+          </div>
+        )}
+      </nav>
 
-            {/* Partial — user speaking */}
-            {partial && (
-              <div className="flex items-end gap-2 justify-end">
-                <div className="max-w-[72%] rounded-2xl rounded-br-none px-4 py-2.5 text-sm bg-blue-600/30 text-white/50 italic border border-blue-500/20">
-                  {partial}
+      {/* ── HERO ── */}
+      <section className="relative min-h-screen flex items-center overflow-hidden">
+        <div className="absolute inset-0">
+          <Image
+            src="https://images.unsplash.com/photo-1576765608535-5f04d1e3f289?w=1600&q=85"
+            alt="Caregiver with senior"
+            fill className="object-cover" unoptimized priority
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#0f2240]/90 via-[#1e3a5f]/75 to-transparent" />
+        </div>
+
+        <div className="relative max-w-7xl mx-auto px-6 py-32 grid lg:grid-cols-2 gap-12 items-center">
+          <div>
+            <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/20 text-white text-xs font-semibold px-4 py-2 rounded-full mb-6">
+              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              AI-Powered Senior Care Navigator
+            </div>
+            <h1 className="text-5xl lg:text-6xl font-bold text-white leading-[1.1] mb-6">
+              Finding the Right Care<br />
+              <span className="text-blue-300">Starts with a Conversation</span>
+            </h1>
+            <p className="text-lg text-white/80 leading-relaxed mb-10 max-w-lg">
+              Infomary guides families through one of life's hardest decisions — with empathy, expertise, and 24/7 availability. No forms. No waiting. Just answers.
+            </p>
+            <div className="flex flex-wrap gap-4 mb-10">
+              <Link href="/voice" className="group flex items-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold px-8 py-4 rounded-xl transition-all shadow-2xl shadow-blue-900/50 hover:shadow-blue-600/50 hover:-translate-y-0.5">
+                <span className="text-xl">🎙️</span>
+                <div className="text-left">
+                  <div className="text-sm font-bold">Talk to Infomary</div>
+                  <div className="text-xs text-blue-200">Voice conversation</div>
                 </div>
-                <div className="w-7 h-7 rounded-full bg-blue-800 border border-blue-600 flex items-center justify-center text-xs shrink-0">👤</div>
-              </div>
-            )}
+              </Link>
+              <Link href="/chat" className="group flex items-center gap-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/30 text-white font-semibold px-8 py-4 rounded-xl transition-all hover:-translate-y-0.5">
+                <span className="text-xl">💬</span>
+                <div className="text-left">
+                  <div className="text-sm font-bold">Chat Instead</div>
+                  <div className="text-xs text-white/60">Text conversation</div>
+                </div>
+              </Link>
+            </div>
+            <div className="flex flex-wrap gap-6">
+              {['No registration needed', 'Free for families', 'Available 24/7'].map((t, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm text-white/70">
+                  <svg className="w-4 h-4 text-green-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  {t}
+                </div>
+              ))}
+            </div>
+          </div>
 
-            {/* Agent typing */}
-            {speaking === 'agent' && transcript[transcript.length - 1]?.role !== 'agent' && (
-              <div className="flex items-end gap-2 justify-start">
-                <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-xs shrink-0 animate-pulse">🩺</div>
-                <div className="bg-gray-800 px-4 py-2.5 rounded-2xl rounded-bl-none border border-gray-700">
-                  <div className="flex gap-1 items-center h-4">
-                    <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          {/* Floating card */}
+          <div className="hidden lg:flex justify-end">
+            <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-6 w-80 shadow-2xl">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-xl">🩺</div>
+                <div>
+                  <p className="text-white font-semibold text-sm">Infomary</p>
+                  <p className="text-white/50 text-xs">AI Care Navigator</p>
+                </div>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                  <span className="text-green-400 text-xs font-medium">Online</span>
+                </div>
+              </div>
+              <div className="bg-white/10 rounded-xl p-4 mb-3">
+                <p className="text-white/90 text-sm leading-relaxed">
+                  "Hello! I'm Infomary. I'm here to help you find the right care for your loved one. What's on your mind today?"
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Link href="/voice" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-2.5 rounded-lg text-center transition-colors">
+                  🎙️ Start Voice
+                </Link>
+                <Link href="/chat" className="flex-1 bg-white/10 hover:bg-white/20 text-white text-xs font-semibold py-2.5 rounded-lg text-center transition-colors">
+                  💬 Start Chat
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Scroll indicator */}
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-white/40">
+          <span className="text-xs uppercase tracking-widest">Scroll</span>
+          <div className="w-px h-8 bg-white/20 animate-pulse" />
+        </div>
+      </section>
+
+      {/* ── STATS BAR ── */}
+      <section className="bg-[#1e3a5f] py-10 px-6">
+        <div className="max-w-7xl mx-auto grid grid-cols-2 lg:grid-cols-4 gap-8">
+          {[
+            { value: '500+', label: 'Families Helped', icon: '👨‍👩‍👧' },
+            { value: '24/7', label: 'AI Availability', icon: '🕐' },
+            { value: '10,000+', label: 'Care Facilities', icon: '🏥' },
+            { value: '50', label: 'States Covered', icon: '🇺🇸' },
+          ].map((s, i) => (
+            <div key={i} className="flex items-center gap-4">
+              <span className="text-3xl">{s.icon}</span>
+              <div>
+                <p className="text-2xl font-bold text-white">{s.value}</p>
+                <p className="text-sm text-blue-300">{s.label}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── SERVICES ── */}
+      <section id="services" className="py-24 px-6 bg-white">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between mb-16 gap-6">
+            <div className="max-w-xl">
+              <span className="text-blue-600 text-sm font-bold uppercase tracking-widest">What We Offer</span>
+              <h2 className="text-4xl font-bold text-[#1e3a5f] mt-3 mb-4">Comprehensive Senior Care Services</h2>
+              <p className="text-gray-500 text-lg">Whatever your loved one needs — we help you find it, understand it, and access it.</p>
+            </div>
+            <Link href="/voice" className="shrink-0 inline-flex items-center gap-2 border-2 border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white font-semibold px-6 py-3 rounded-xl transition-all text-sm">
+              Find Care Now →
+            </Link>
+          </div>
+
+          {/* Featured top 2 large cards */}
+          <div className="grid lg:grid-cols-2 gap-6 mb-6">
+            {[
+              {
+                title: 'In-Home Care',
+                desc: 'Personalized daily assistance so your loved one can stay safely and comfortably at home — on their own terms.',
+                img: 'https://images.unsplash.com/photo-1576765608535-5f04d1e3f289?w=800&q=80',
+                tag: 'Most Requested',
+                tagColor: 'bg-blue-600',
+              },
+              {
+                title: 'Memory Care',
+                desc: "Specialized, compassionate support for Alzheimer's, dementia, and cognitive decline — in a safe, structured environment.",
+                img: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=800&q=80',
+                tag: 'Specialized',
+                tagColor: 'bg-violet-600',
+              },
+            ].map((s, i) => (
+              <div key={i} className="group relative rounded-3xl overflow-hidden h-72 cursor-pointer">
+                <Image src={s.img} alt={s.title} fill className="object-cover group-hover:scale-105 transition-transform duration-700" unoptimized />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#0f2240]/90 via-[#0f2240]/40 to-transparent" />
+                <div className="absolute inset-0 p-8 flex flex-col justify-end">
+                  <span className={`${s.tagColor} text-white text-xs font-bold px-3 py-1 rounded-full w-fit mb-3`}>{s.tag}</span>
+                  <h3 className="text-2xl font-bold text-white mb-2">{s.title}</h3>
+                  <p className="text-white/70 text-sm leading-relaxed">{s.desc}</p>
+                  <div className="mt-4 flex items-center gap-2 text-blue-300 text-sm font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                    Learn more <span>→</span>
                   </div>
                 </div>
               </div>
-            )}
+            ))}
+          </div>
 
-            <div ref={messagesEndRef} />
+          {/* Bottom 4 smaller cards */}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {[
+              {
+                icon: '💊',
+                title: 'Skilled Nursing',
+                desc: 'Licensed medical care, wound care, and post-hospital rehabilitation.',
+                color: 'from-blue-50 to-indigo-50',
+                border: 'border-blue-100',
+                iconBg: 'bg-blue-100',
+              },
+              {
+                icon: '🏥',
+                title: 'Assisted Living',
+                desc: 'Warm, supervised communities with 24/7 professional support.',
+                color: 'from-violet-50 to-purple-50',
+                border: 'border-violet-100',
+                iconBg: 'bg-violet-100',
+              },
+              {
+                icon: '🤝',
+                title: 'Companion Care',
+                desc: 'Meaningful social engagement to combat isolation and loneliness.',
+                color: 'from-emerald-50 to-teal-50',
+                border: 'border-emerald-100',
+                iconBg: 'bg-emerald-100',
+              },
+              {
+                icon: '🚗',
+                title: 'Transportation',
+                desc: 'Reliable, safe rides to appointments, errands, and activities.',
+                color: 'from-orange-50 to-amber-50',
+                border: 'border-orange-100',
+                iconBg: 'bg-orange-100',
+              },
+            ].map((s, i) => (
+              <div key={i} className={`group bg-gradient-to-br ${s.color} rounded-2xl p-6 border ${s.border} hover:shadow-lg transition-all duration-300 cursor-default`}>
+                <div className={`${s.iconBg} w-12 h-12 rounded-xl flex items-center justify-center text-2xl mb-5`}>
+                  {s.icon}
+                </div>
+                <h3 className="font-bold text-[#1e3a5f] mb-2 group-hover:text-blue-600 transition-colors">{s.title}</h3>
+                <p className="text-gray-500 text-sm leading-relaxed">{s.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
+      </section>
 
-        {/* Footer */}
-        <div className="px-4 py-3 border-t border-gray-800 flex items-center justify-center gap-4 shrink-0">
-          <span className="text-[10px] font-semibold uppercase tracking-widest min-w-[100px] text-center">
-            {speaking === 'agent' && <span className="text-blue-400 animate-pulse">Agent Speaking</span>}
-            {speaking === 'user' && <span className="text-purple-400 animate-pulse">You Speaking</span>}
-            {!speaking && connected && <span className="text-gray-500">Listening...</span>}
-            {!connected && <span className="text-gray-600">Ready</span>}
-          </span>
-          <div className="h-5 w-px bg-gray-700" />
-          {!connected ? (
-            <button onClick={connectToSpeechmatics} className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-semibold px-6 py-2 rounded-xl text-sm transition-all">
-              🎙️ Start
-            </button>
-          ) : (
-            <button onClick={disconnect} className="bg-red-600 hover:bg-red-700 active:scale-95 text-white font-semibold px-6 py-2 rounded-xl text-sm transition-all">
-              ⏹ Stop
-            </button>
-          )}
+      {/* ── HOW IT WORKS ── */}
+      <section id="how-it-works" className="py-24 px-6 bg-white">
+        <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-16 items-center">
+          <div>
+            <span className="text-blue-600 text-sm font-bold uppercase tracking-widest">Simple Process</span>
+            <h2 className="text-4xl font-bold text-[#1e3a5f] mt-3 mb-6">How Infomary Guides You</h2>
+            <p className="text-gray-500 text-lg mb-10">No confusing directories. No cold calls. Just a warm, intelligent conversation that leads to the right care.</p>
+            <div className="space-y-8">
+              {[
+                { num: '01', title: 'Start a Conversation', desc: 'Talk or type — Infomary listens with empathy and asks the right questions to understand your situation.', color: 'bg-blue-600' },
+                { num: '02', title: 'Get Personalized Matches', desc: 'Based on your needs, location, and budget, Infomary recommends the most suitable care options.', color: 'bg-indigo-600' },
+                { num: '03', title: 'Connect with Confidence', desc: 'We connect you directly with verified facilities and caregivers — no middlemen, no pressure.', color: 'bg-violet-600' },
+              ].map((s, i) => (
+                <div key={i} className="flex gap-5">
+                  <div className={`${s.color} w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-lg`}>{s.num}</div>
+                  <div>
+                    <h3 className="font-bold text-[#1e3a5f] mb-1">{s.title}</h3>
+                    <p className="text-gray-500 text-sm leading-relaxed">{s.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-10">
+              <Link href="/voice" className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-7 py-3.5 rounded-xl transition-all shadow-lg shadow-blue-600/30 hover:-translate-y-0.5">
+                Try It Now — It's Free →
+              </Link>
+            </div>
+          </div>
+          <div className="relative">
+            <div className="rounded-3xl overflow-hidden shadow-2xl">
+              <Image
+                src="https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=800&q=85"
+                alt="Senior care consultation"
+                width={800} height={600}
+                className="w-full h-[500px] object-cover"
+                unoptimized
+              />
+            </div>
+            <div className="absolute -bottom-6 -left-6 bg-white rounded-2xl shadow-xl p-5 border border-gray-100">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center text-green-600 text-sm">✓</div>
+                <span className="font-bold text-gray-800 text-sm">Match Found</span>
+              </div>
+              <p className="text-xs text-gray-500">3 facilities near Chicago, IL</p>
+              <p className="text-xs text-blue-600 font-medium mt-1">Memory Care • In-Home Care</p>
+            </div>
+          </div>
         </div>
-      </div>
+      </section>
+
+      {/* ── ABOUT ── */}
+      <section id="about" className="py-24 px-6 bg-[#f8faff]">
+        <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-16 items-center">
+          <div>
+            <span className="text-blue-600 text-sm font-bold uppercase tracking-widest">Our Mission</span>
+            <h2 className="text-4xl font-bold text-[#1e3a5f] mt-3 mb-6">Built for American Families Navigating Senior Care</h2>
+            <p className="text-gray-600 leading-relaxed mb-5">
+              InfoSenior.care was founded on a simple belief — that every family deserves compassionate, expert guidance when searching for senior care. Not a cold directory. Not a sales pitch. A real conversation.
+            </p>
+            <p className="text-gray-600 leading-relaxed mb-8">
+              Infomary combines the latest AI with deep healthcare knowledge to provide emotionally intelligent, always-available support — completely free for families across all 50 states.
+            </p>
+            <div className="grid grid-cols-2 gap-4 mb-8">
+              {[
+                { icon: '🔒', title: 'HIPAA-Ready', desc: 'Your data is always protected' },
+                { icon: '✅', title: 'Verified Facilities', desc: 'Licensed & background-checked' },
+                { icon: '🆓', title: 'Free for Families', desc: 'No hidden fees, ever' },
+                { icon: '🇺🇸', title: 'All 50 States', desc: 'Nationwide coverage' },
+              ].map((item, i) => (
+                <div key={i} className="flex items-start gap-3 bg-white rounded-xl p-4 border border-gray-100">
+                  <span className="text-xl">{item.icon}</span>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">{item.title}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{item.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="relative">
+            <div className="rounded-3xl overflow-hidden shadow-2xl">
+              <Image
+                src="https://images.unsplash.com/photo-1582750433449-648ed127bb54?w=800&q=85"
+                alt="Senior with family"
+                width={800} height={600}
+                className="w-full h-[480px] object-cover"
+                unoptimized
+              />
+            </div>
+            <div className="absolute -top-5 -right-5 bg-blue-600 text-white rounded-2xl p-5 shadow-xl">
+              <p className="text-3xl font-bold">98%</p>
+              <p className="text-blue-200 text-xs mt-1">Family Satisfaction</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── TESTIMONIALS ── */}
+      <section className="py-24 px-6 bg-white">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-16">
+            <span className="text-blue-600 text-sm font-bold uppercase tracking-widest">Testimonials</span>
+            <h2 className="text-4xl font-bold text-[#1e3a5f] mt-3">Families Trust InfoSenior.care</h2>
+          </div>
+          <div className="grid md:grid-cols-3 gap-8">
+            {testimonials.map((t, i) => (
+              <div key={i} className="bg-gray-50 rounded-2xl p-7 border border-gray-100 hover:shadow-lg transition-shadow">
+                <div className="flex gap-1 mb-4">
+                  {[...Array(5)].map((_, j) => <span key={j} className="text-yellow-400 text-sm">★</span>)}
+                </div>
+                <p className="text-gray-700 text-sm leading-relaxed mb-6 italic">&ldquo;{t.text}&rdquo;</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold">{t.avatar}</div>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">{t.name}</p>
+                    <p className="text-xs text-gray-400">{t.location}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── CTA ── */}
+      <section className="relative py-24 px-6 overflow-hidden">
+        <div className="absolute inset-0">
+          <Image src="https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=1600&q=80" alt="bg" fill className="object-cover" unoptimized />
+          <div className="absolute inset-0 bg-[#1e3a5f]/90" />
+        </div>
+        <div className="relative max-w-3xl mx-auto text-center">
+          <h2 className="text-4xl lg:text-5xl font-bold text-white mb-5">Start the Conversation Today</h2>
+          <p className="text-blue-200 text-lg mb-10">Thousands of families have found the right care through Infomary. Yours can too — in minutes, not weeks.</p>
+          <div className="flex flex-wrap justify-center gap-4">
+            <Link href="/voice" className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-10 py-4 rounded-xl transition-all shadow-2xl hover:-translate-y-0.5 text-sm">
+              🎙️ Start Voice Conversation
+            </Link>
+            <Link href="/chat" className="bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/30 text-white font-bold px-10 py-4 rounded-xl transition-all hover:-translate-y-0.5 text-sm">
+              💬 Start Text Chat
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* ── FAQ ── */}
+      <section className="py-24 px-6 bg-gray-50">
+        <div className="max-w-3xl mx-auto">
+          <div className="text-center mb-14">
+            <span className="text-blue-600 text-sm font-bold uppercase tracking-widest">FAQ</span>
+            <h2 className="text-4xl font-bold text-[#1e3a5f] mt-3">Common Questions</h2>
+          </div>
+          <div className="space-y-3">
+            {faqs.map((faq, i) => (
+              <div key={i} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                <button onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                  className="w-full flex items-center justify-between px-6 py-5 text-left hover:bg-gray-50 transition-colors">
+                  <span className="font-semibold text-gray-800 text-sm">{faq.q}</span>
+                  <span className={`text-blue-600 text-lg transition-transform ${openFaq === i ? 'rotate-45' : ''}`}>+</span>
+                </button>
+                {openFaq === i && (
+                  <div className="px-6 pb-5">
+                    <p className="text-gray-500 text-sm leading-relaxed">{faq.a}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── CONTACT ── */}
+      <section id="contact" className="py-24 px-6 bg-white">
+        <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-16 items-start">
+          <div>
+            <span className="text-blue-600 text-sm font-bold uppercase tracking-widest">Contact Us</span>
+            <h2 className="text-4xl font-bold text-[#1e3a5f] mt-3 mb-5">Get in Touch</h2>
+            <p className="text-gray-500 leading-relaxed mb-10">Whether you have questions, want to list your facility, or need support — our team is here.</p>
+            <div className="space-y-6">
+              {[
+                { icon: '📧', label: 'Email Us', value: 'hello@infosenior.care', sub: 'We reply within 24 hours' },
+                { icon: '📞', label: 'Call Us', value: '+1 (800) 555-0199', sub: 'Mon–Fri, 9am–6pm EST' },
+                { icon: '📍', label: 'Coverage', value: 'All 50 United States', sub: '10,000+ verified facilities' },
+              ].map((item, i) => (
+                <div key={i} className="flex items-start gap-4">
+                  <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-xl shrink-0">{item.icon}</div>
+                  <div>
+                    <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-0.5">{item.label}</p>
+                    <p className="font-bold text-gray-800">{item.value}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{item.sub}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="bg-gray-50 rounded-3xl p-8 border border-gray-100">
+            {submitted ? (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">✅</div>
+                <h3 className="text-xl font-bold text-[#1e3a5f] mb-2">Message Received!</h3>
+                <p className="text-gray-500 text-sm">We will get back to you within 24 hours.</p>
+              </div>
+            ) : (
+              <form onSubmit={(e) => { e.preventDefault(); setSubmitted(true) }} className="space-y-5">
+                <h3 className="text-xl font-bold text-[#1e3a5f] mb-6">Send Us a Message</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Full Name</label>
+                    <input type="text" required placeholder="John Smith"
+                      value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+                      className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Phone</label>
+                    <input type="tel" placeholder="+1 (555) 000-0000"
+                      value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
+                      className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Email Address</label>
+                  <input type="email" required placeholder="john@example.com"
+                    value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}
+                    className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Message</label>
+                  <textarea rows={4} required placeholder="How can we help you?"
+                    value={form.message} onChange={e => setForm({ ...form, message: e.target.value })}
+                    className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all resize-none" />
+                </div>
+                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/30 hover:-translate-y-0.5">
+                  Send Message →
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── FOOTER ── */}
+      <footer className="bg-[#0f2240] text-white pt-16 pb-8 px-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid md:grid-cols-4 gap-10 mb-12">
+            <div className="md:col-span-2">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                  <span className="text-white text-sm font-bold">IS</span>
+                </div>
+                <span className="text-xl font-bold">InfoSenior<span className="text-blue-400">.care</span></span>
+              </div>
+              <p className="text-blue-200/70 text-sm leading-relaxed max-w-xs mb-5">
+                AI-powered senior care navigation for American families. Compassionate, free, and available 24/7.
+              </p>
+              <p className="text-blue-300/50 text-xs">Not a medical service. For guidance only.</p>
+            </div>
+            <div>
+              <h4 className="font-bold text-xs uppercase tracking-widest text-blue-400 mb-5">Platform</h4>
+              <ul className="space-y-3 text-sm text-blue-200/70">
+                <li><Link href="/voice" className="hover:text-white transition-colors">Voice Agent</Link></li>
+                <li><Link href="/chat" className="hover:text-white transition-colors">Text Agent</Link></li>
+                <li><a href="#services" className="hover:text-white transition-colors">Services</a></li>
+                <li><a href="#how-it-works" className="hover:text-white transition-colors">How It Works</a></li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-bold text-xs uppercase tracking-widest text-blue-400 mb-5">Company</h4>
+              <ul className="space-y-3 text-sm text-blue-200/70">
+                <li><a href="#about" className="hover:text-white transition-colors">About Us</a></li>
+                <li><a href="#contact" className="hover:text-white transition-colors">Contact</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Privacy Policy</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Terms of Service</a></li>
+              </ul>
+            </div>
+          </div>
+          <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row items-center justify-between gap-3">
+            <p className="text-blue-300/50 text-xs">© 2025 InfoSenior.care. All rights reserved.</p>
+            <div className="flex items-center gap-2 text-xs text-blue-300/50">
+              <span className="w-2 h-2 bg-green-400 rounded-full" />
+              All systems operational
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }
