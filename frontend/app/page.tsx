@@ -80,6 +80,8 @@ function VoiceAgent() {
             type: "raw",
             encoding: "pcm_f32le",
           },
+          // 25347d97 - a596 - 4f8d- a97e - d0bef9d659f1: latest
+          // 0976156d-9e20-46b7-be7d-3371ff6ae24f:latest
           conversation_config: {
             template_id: "0976156d-9e20-46b7-be7d-3371ff6ae24f:latest",
             template_variables: {
@@ -92,7 +94,6 @@ function VoiceAgent() {
       };
       webSocket.onmessage = async (event) => {
         const data = event.data;
-
         if (data instanceof ArrayBuffer) {
           playChunk(data);
           return;
@@ -155,10 +156,6 @@ function VoiceAgent() {
 
             console.log(`🔧 Tool call: ${toolName}`, toolArgs)
 
-            // Inject session_id if missing
-            if (toolName === 'save_lead' && !toolArgs.session_id) {
-              toolArgs.session_id = sessionId
-            }
 
             if (toolName === 'end_conversation' || toolName === 'EndConversation') {
               if (webSocketRef.current) {
@@ -166,6 +163,10 @@ function VoiceAgent() {
                 setPromptResponse([])
               }
               break
+            }
+            // Inject session_id if missing
+            if (toolName === 'save_lead' && !toolArgs.session_id) {
+              toolArgs.session_id = sessionId
             }
 
             try {

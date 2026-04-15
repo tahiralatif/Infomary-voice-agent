@@ -17,7 +17,7 @@ function useAudioQueue() {
   const startTimeRef = useRef(0);
   const isPlayingRef = useRef(false);
 
-  const MIN_BUFFER_SIZE = 16000 * 0.6;
+  const MIN_BUFFER_SIZE = 16000 * 0.5;
   // Initialize AudioContext on user interaction
   const initAudioContext = () => {
     if (!audioCtxRef.current) {

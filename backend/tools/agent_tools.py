@@ -199,6 +199,7 @@ async def _upsert_sheet(lead: dict, session_id: str) -> dict:
                 _sessions[session_id]["row_index"] = len(col_a)
 
         await loop.run_in_executor(None, _run)
+        logger.info("Successfully upserted data in sheet.")
         return {"success": True}
     except Exception as e:
         logger.error(f"Sheet error: {e}")
@@ -256,7 +257,7 @@ async def _save_lead(
         result = await _send_email(lead)
         if result["success"]:
             _sessions[session_id]["email_sent"] = True
-
+    logger.info("Successfully saved user lead.")
     return f"Lead saved. ID: {lead_id}"
 
 async def _google_search(query: str) -> str:
@@ -274,6 +275,7 @@ async def _google_search(query: str) -> str:
             organic = response.json().get("organic", [])
             if not organic:
                 return "No results found."
+            logger.info("Successfully performed google Search.")
             return "\n".join(
                 f"• {r.get('title')}: {r.get('snippet')} ({r.get('link')})"
                 for r in organic[:5]
