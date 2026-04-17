@@ -8,12 +8,12 @@ import resend
 import json
 import httpx
 import logging
+import time
 from google.oauth2.service_account import Credentials
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
+from logger import log_lead, log_sheet, log_email, log_search, log_error, log_warn, log_success
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 load_dotenv()
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1sJYvoP4BOVeMWaFGBOPTtpuJKrY847n3GQzElQyPRKY/edit?usp=sharing"
@@ -142,7 +142,8 @@ def _build_html_email(lead: dict) -> str:
 </body></html>"""
 
 async def _send_email(lead: dict) -> dict:
-    logger.info("Sending lead notification email")
+    log_email(f"Sending notification │ lead={lead.get('lead_id')} │ to={lead.get('name','?')} │ need={lead.get('care_need','?')[:60]}")
+    t = time.time()
     try:
         resend.api_key = os.getenv("RESEND_API_KEY")
         resend.Emails.send({
@@ -151,46 +152,37 @@ async def _send_email(lead: dict) -> dict:
             "subject": f"New Lead: {lead.get('name','Unknown')} | {lead.get('care_need','N/A')}",
             "html": _build_html_email(lead)
         })
+        ms = int((time.time() - t) * 1000)
+        log_success(f"Email sent        │ lead={lead.get('lead_id')} │ took={ms}ms")
         return {"success": True}
     except Exception as e:
-        logger.error(f"Email failed: {e}")
+        log_error(f"Email failed      │ lead={lead.get('lead_id')} │ {e}")
         return {"success": False, "error": str(e)}
 
 async def _upsert_sheet(lead: dict, session_id: str) -> dict:
-    logger.info(f"Upserting sheet row for session {session_id}")
+    t = time.time()
     try:
         loop = asyncio.get_event_loop()
 
         def _run():
             creds_json = os.getenv("GOOGLE_CREDENTIALS")
             if creds_json:
-                creds = Credentials.from_service_account_info(
-                    json.loads(creds_json), scopes=SCOPES)
+                creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
             else:
-                creds = Credentials.from_service_account_file(
-                    CREDENTIALS_FILE, scopes=SCOPES)
-
+                creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
             client = gspread.authorize(creds)
             sheet = client.open_by_url(SHEET_URL).sheet1
-
             row_data = [
-                lead.get("lead_id",""),      lead.get("name",""),
-                lead.get("email",""),         lead.get("phone",""),
-                lead.get("care_need",""),     lead.get("location",""),
-                lead.get("status","New"),     lead.get("notes",""),
-                lead.get("saved_at",""),      lead.get("age",""),
-                lead.get("gender",""),        lead.get("living_arrangement",""),
-                lead.get("physician",""),     lead.get("conditions",""),
-                lead.get("hospitalizations",""), lead.get("medications",""),
-                lead.get("allergies",""),     lead.get("care_type",""),
-                lead.get("care_hours",""),    lead.get("insurance",""),
-                lead.get("budget",""),        lead.get("home_hazards",""),
-                lead.get("medical_equipment",""), lead.get("other_factors",""),
+                lead.get("lead_id",""), lead.get("name",""), lead.get("email",""), lead.get("phone",""),
+                lead.get("care_need",""), lead.get("location",""), lead.get("status","New"), lead.get("notes",""),
+                lead.get("saved_at",""), lead.get("age",""), lead.get("gender",""), lead.get("living_arrangement",""),
+                lead.get("physician",""), lead.get("conditions",""), lead.get("hospitalizations",""),
+                lead.get("medications",""), lead.get("allergies",""), lead.get("care_type",""),
+                lead.get("care_hours",""), lead.get("insurance",""), lead.get("budget",""),
+                lead.get("home_hazards",""), lead.get("medical_equipment",""), lead.get("other_factors",""),
                 lead.get("transportation",""),
             ]
-
             existing_row = _sessions[session_id].get("row_index")
-
             if existing_row:
                 sheet.update(f"A{existing_row}:Y{existing_row}", [row_data])
             else:
@@ -199,9 +191,11 @@ async def _upsert_sheet(lead: dict, session_id: str) -> dict:
                 _sessions[session_id]["row_index"] = len(col_a)
 
         await loop.run_in_executor(None, _run)
+        ms = int((time.time() - t) * 1000)
+        log_sheet(f"Sheet saved | lead={lead.get('lead_id')} | {ms}ms")
         return {"success": True}
     except Exception as e:
-        logger.error(f"Sheet error: {e}")
+        log_error(f"Sheet FAILED | lead={lead.get('lead_id')} | {e}")
         return {"success": False, "error": str(e)}
 
 async def _save_lead(
@@ -216,16 +210,15 @@ async def _save_lead(
     other_factors: str = "", transportation: str = "",
 ) -> str:
 
-    if session_id not in _sessions:
-        _sessions[session_id] = {
-            "lead_id": str(uuid.uuid4())[:8].upper(),
-            "row_index": None,
-            "email_sent": False
-        }
+    is_new = session_id not in _sessions
+    if is_new:
+        _sessions[session_id] = {"lead_id": str(uuid.uuid4())[:8].upper(), "row_index": None, "email_sent": False}
 
     session    = _sessions[session_id]
     lead_id    = session["lead_id"]
     email_sent = session["email_sent"]
+    action     = "new" if is_new else "update"
+    log_lead(f"save_lead [{action}] | lead={lead_id} | session={session_id[:12]}")
 
     lead = {
         "lead_id": lead_id,
@@ -248,7 +241,16 @@ async def _save_lead(
 
     await _upsert_sheet(lead, session_id)
 
-    # Trigger email once when enough contact info is present
+    # Save to Supabase
+    try:
+        import database as _db
+        await _db.upsert_lead({**lead, "session_id": session_id, "email_sent": _sessions[session_id]["email_sent"]})
+        log_lead(f"Supabase saved | lead={lead_id}")
+    except Exception as e:
+        import traceback
+        log_error(f"Supabase FAILED | lead={lead_id} | {type(e).__name__}: {e}")
+        log_error(traceback.format_exc())
+
     has_name    = bool(name.strip())
     has_contact = bool(phone.strip() or email.strip())
 
@@ -256,29 +258,38 @@ async def _save_lead(
         result = await _send_email(lead)
         if result["success"]:
             _sessions[session_id]["email_sent"] = True
+            try:
+                import database as _db
+                await _db.upsert_lead({**lead, "session_id": session_id, "email_sent": True})
+            except Exception as e:
+                log_error(f"Supabase email_sent update FAILED | lead={lead_id} | {e}")
 
+    log_lead(f"save_lead done | lead={lead_id} | sheet+supabase saved")
     return f"Lead saved. ID: {lead_id}"
 
 async def _google_search(query: str) -> str:
+    log_search(f"Query             │ \"{query}\"")
+    t = time.time()
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 "https://google.serper.dev/search",
-                headers={
-                    "X-API-KEY": os.getenv("SERPER_API_KEY"),
-                    "Content-Type": "application/json"
-                },
+                headers={"X-API-KEY": os.getenv("SERPER_API_KEY"), "Content-Type": "application/json"},
                 json={"q": query, "num": 5},
                 timeout=10.0
             )
             organic = response.json().get("organic", [])
+            ms = int((time.time() - t) * 1000)
             if not organic:
+                log_search(f"No results        │ took={ms}ms")
                 return "No results found."
+            log_search(f"Results returned  │ count={len(organic)} │ took={ms}ms")
             return "\n".join(
                 f"• {r.get('title')}: {r.get('snippet')} ({r.get('link')})"
                 for r in organic[:5]
             )
     except Exception as e:
+        log_error(f"Search failed     │ query=\"{query}\" │ {e}")
         return f"Search failed: {e}"
 
 google_search = StructuredTool.from_function(

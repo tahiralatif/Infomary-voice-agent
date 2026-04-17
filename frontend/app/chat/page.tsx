@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect, useCallback, Suspense, ReactNode, HTMLAttributes, CSSProperties } from 'react'
+import { useState, useRef, useEffect, useCallback, Suspense, ReactNode, HTMLAttributes } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
@@ -7,33 +7,18 @@ import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { dracula } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { FiMenu, FiX, FiMic, FiMessageSquare, FiHome, FiTrash2 } from 'react-icons/fi'
+import { RiNurseLine } from 'react-icons/ri'
 
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-}
+interface Message { role: 'user' | 'assistant'; content: string }
+interface Session { session_id: string; title: string; description: string; created_at: string }
+interface Toast { id: string; message: string; type: 'success' | 'error' | 'info' }
 
-interface Session {
-  session_id: string
-  title: string
-  description: string
-  created_at: string
-}
-
-interface Toast {
-  id: string
-  message: string
-  type: 'success' | 'error' | 'info'
-}
-
-function generateSessionId(): string {
-  return crypto.randomUUID()
-}
+function generateSessionId(): string { return crypto.randomUUID() }
 
 function ChatPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-
   const [sessionId, setSessionId] = useState<string>('')
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -44,498 +29,402 @@ function ChatPageInner() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [wsConnected, setWsConnected] = useState(false)
+  const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'reconnecting'>('connecting')
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectAttemptsRef = useRef(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
-  const [wsConnected, setWsConnected] = useState(false)
+  const titleGeneratedRef = useRef(false)
 
   const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = crypto.randomUUID()
     setToasts(prev => [...prev, { id, message, type }])
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id))
-    }, 3000)
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000)
   }, [])
 
   const loadSessions = useCallback(async () => {
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      const res = await fetch(`${backendUrl}/sessions`)
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/sessions`)
       const data = await res.json()
       setSessions(data.sessions || [])
-    } catch (error) {
-      console.error('Failed to load sessions:', error)
-      addToast('Failed to load chat history', 'error')
-    }
+    } catch { addToast('Failed to load chat history', 'error') }
   }, [addToast])
 
   const generateTitle = useCallback(async (sid: string, userMsg: string, aiMsg: string) => {
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      await fetch(`${backendUrl}/generate-title`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sid, user_message: userMsg, ai_response: aiMsg })
+      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/generate-title`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sid, user_message: userMsg, ai_response: aiMsg }),
       })
       loadSessions()
-    } catch (error) {
-      console.error('Failed to generate title:', error)
-    }
+    } catch { console.error('Failed to generate title') }
   }, [loadSessions])
 
   const loadHistory = useCallback(async (sid: string) => {
     setLoadingHistory(true)
+    const defaultMsg: Message = { role: 'assistant', content: "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?" }
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      const res = await fetch(`${backendUrl}/history/${sid}`)
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/history/${sid}`)
       const data = await res.json()
-
-      if (data.messages && data.messages.length > 0) {
+      if (data.messages?.length > 0) {
         setMessages(data.messages)
         if (data.messages.length >= 2) {
-          const firstUserMsg = data.messages.find((m: Message) => m.role === 'user')
-          const firstAiMsg = data.messages.find((m: Message) => m.role === 'assistant' && m.content !== "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?")
-          if (firstUserMsg && firstAiMsg) {
-            generateTitle(sid, firstUserMsg.content, firstAiMsg.content)
-            setTitleGenerated(true)
-          }
+          const u = data.messages.find((m: Message) => m.role === 'user')
+          const a = data.messages.find((m: Message) => m.role === 'assistant' && m.content !== defaultMsg.content)
+          if (u && a) { generateTitle(sid, u.content, a.content); setTitleGenerated(true) }
         }
-      } else {
-        setMessages([{
-          role: 'assistant',
-          content: "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?"
-        }])
-      }
-    } catch (error) {
-      console.error('Failed to load history:', error)
-      addToast('Failed to load chat history', 'error')
-      setMessages([{
-        role: 'assistant',
-        content: "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?"
-      }])
-    } finally {
-      setLoadingHistory(false)
-    }
+      } else { setMessages([defaultMsg]) }
+    } catch { addToast('Failed to load chat history', 'error'); setMessages([defaultMsg]) }
+    finally { setLoadingHistory(false) }
   }, [addToast, generateTitle])
 
   const connectWebSocket = useCallback((sid: string) => {
-
-    if (wsRef.current) {
-      wsRef.current.close()
-    }
-
-    const wsUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000')
-      .replace('https://', 'wss://')
-      .replace('http://', 'ws://')
-
+    if (wsRef.current) wsRef.current.close()
+    setWsStatus('connecting')
+    const wsUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000').replace('https://', 'wss://').replace('http://', 'ws://')
     const ws = new WebSocket(`${wsUrl}/ws/${sid}`)
 
     ws.onopen = () => {
       setWsConnected(true)
-      console.log('[WS] Connected')
+      setWsStatus('connected')
+      reconnectAttemptsRef.current = 0
+      // If there was a pending message, resend it
+      const pending = localStorage.getItem(`pending_${sid}`)
+      if (pending) {
+        setPendingMessage(pending)
+      }
     }
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: data.response
-      }])
+    ws.onmessage = (e) => {
+      const d = JSON.parse(e.data)
+      setMessages(p => [...p, { role: 'assistant', content: d.response }])
       setLoading(false)
+      // Clear pending message on successful response
+      localStorage.removeItem(`pending_${sid}`)
+      setPendingMessage(null)
     }
 
     ws.onerror = () => {
-      addToast('Connection error — retrying...', 'error')
       setWsConnected(false)
+      setWsStatus('disconnected')
     }
 
     ws.onclose = () => {
       setWsConnected(false)
+      setWsStatus('reconnecting')
+      // Auto-reconnect with backoff: 2s, 4s, 8s, max 10s
+      const attempts = reconnectAttemptsRef.current
+      if (attempts < 5) {
+        const delay = Math.min(2000 * Math.pow(1.5, attempts), 10000)
+        reconnectAttemptsRef.current += 1
+        reconnectTimerRef.current = setTimeout(() => connectWebSocket(sid), delay)
+      } else {
+        setWsStatus('disconnected')
+      }
     }
 
     wsRef.current = ws
-  }, [addToast])
+  }, [])
 
-  // Load sessions on mount
-  useEffect(() => {
-    loadSessions()
-  }, [loadSessions])
+  useEffect(() => { loadSessions() }, [loadSessions])
 
-  // React to URL session param changes
   useEffect(() => {
-    const urlSessionId = searchParams.get('session')
-    if (urlSessionId) {
-      setSessionId(urlSessionId)
-      setTitleGenerated(false)
-      loadHistory(urlSessionId)
-    } else {
-      const newSessionId = generateSessionId()
-      setSessionId(newSessionId)
-      router.replace(`/chat?session=${newSessionId}`)
-      setLoadingHistory(false)
-      setMessages([{
-        role: 'assistant',
-        content: "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?"
-      }])
+    const urlSid = searchParams.get('session')
+    const defaultMsg: Message = { role: 'assistant', content: "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?" }
+    if (urlSid) { setSessionId(urlSid); setTitleGenerated(false); loadHistory(urlSid) }
+    else {
+      const newId = generateSessionId()
+      setSessionId(newId); router.replace(`/chat?session=${newId}`)
+      setLoadingHistory(false); setMessages([defaultMsg])
     }
   }, [searchParams, router, loadHistory])
 
   const startNewChat = useCallback(() => {
-    const newSessionId = generateSessionId()
-    setSessionId(newSessionId)
-    titleGeneratedRef.current = false
-    setTitleGenerated(false)
-    setMessages([{
-      role: 'assistant',
-      content: "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?"
-    }])
-    router.push(`/chat?session=${newSessionId}`)
-    loadSessions()
-    setIsSidebarOpen(false)
-    addToast('New chat started', 'info')
+    const newId = generateSessionId()
+    const defaultMsg: Message = { role: 'assistant', content: "Hello! I'm Infomary from InfoSenior.care. I'm here to help you or your loved one find the right care. How can I help you today?" }
+    setSessionId(newId); titleGeneratedRef.current = false; setTitleGenerated(false); setMessages([defaultMsg])
+    router.push(`/chat?session=${newId}`); loadSessions(); setIsSidebarOpen(false); addToast('New chat started', 'info')
   }, [router, loadSessions, addToast])
 
   const loadSession = useCallback((sid: string) => {
-    setSessionId(sid)
-    titleGeneratedRef.current = false
-    setTitleGenerated(false)
-    loadHistory(sid)
-    router.push(`/chat?session=${sid}`)
-    setIsSidebarOpen(false)
+    setSessionId(sid); titleGeneratedRef.current = false; setTitleGenerated(false)
+    loadHistory(sid); router.push(`/chat?session=${sid}`); setIsSidebarOpen(false)
   }, [router, loadHistory])
-
-  const handleDeleteClick = (e: React.MouseEvent, sid: string) => {
-    e.stopPropagation()
-    setDeleteConfirm(sid)
-  }
 
   const handleDeleteConfirm = async () => {
     if (!deleteConfirm) return
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      await fetch(`${backendUrl}/delete-session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: deleteConfirm })
+      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}/delete-session`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: deleteConfirm }),
       })
-      addToast('Chat deleted successfully', 'success')
-      if (deleteConfirm === sessionId) {
-        startNewChat()
-      } else {
-        loadSessions()
-      }
-    } catch (error) {
-      console.error('Failed to delete session:', error)
-      addToast('Failed to delete chat', 'error')
-    } finally {
-      setDeleteConfirm(null)
-    }
+      addToast('Chat deleted', 'success')
+      if (deleteConfirm === sessionId) startNewChat(); else loadSessions()
+    } catch { addToast('Failed to delete chat', 'error') }
+    finally { setDeleteConfirm(null) }
   }
-
-  const handleDeleteCancel = () => setDeleteConfirm(null)
 
   useEffect(() => {
     if (sessionId) connectWebSocket(sessionId)
-    return () => { wsRef.current?.close() }
+    return () => {
+      wsRef.current?.close()
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+    }
   }, [sessionId, connectWebSocket])
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  const titleGeneratedRef = useRef(false)
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   const sendMessage = async () => {
     if (!input.trim() || loading || !sessionId) return
-
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      addToast('Connecting...', 'info')
+      // Save to localStorage so it survives disconnect
+      localStorage.setItem(`pending_${sessionId}`, input)
+      setPendingMessage(input)
       connectWebSocket(sessionId)
-      setTimeout(() => sendMessage(), 800)
       return
     }
-
-    const userMessage: Message = { role: 'user', content: input }
-    setMessages(prev => [...prev, userMessage])
-    const currentInput = input
-    setInput('')
-    setLoading(true)
-
-
-    const shouldGenerateTitle = !titleGeneratedRef.current
-
-    wsRef.current.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response }])
-      setLoading(false)
-
-      if (shouldGenerateTitle) {
-        titleGeneratedRef.current = true
-        setTitleGenerated(true)
-        generateTitle(sessionId, currentInput, data.response)
-        loadSessions()
-      }
+    const cur = input
+    // Save pending before sending — cleared on response
+    localStorage.setItem(`pending_${sessionId}`, cur)
+    const userMsg: Message = { role: 'user', content: cur }
+    setMessages(p => [...p, userMsg]); setInput(''); setLoading(true)
+    const shouldTitle = !titleGeneratedRef.current
+    wsRef.current.onmessage = (e) => {
+      const d = JSON.parse(e.data)
+      setMessages(p => [...p, { role: 'assistant', content: d.response }]); setLoading(false)
+      localStorage.removeItem(`pending_${sessionId}`)
+      setPendingMessage(null)
+      if (shouldTitle) { titleGeneratedRef.current = true; setTitleGenerated(true); generateTitle(sessionId, cur, d.response); loadSessions() }
     }
-
-    wsRef.current.send(JSON.stringify({
-      message: currentInput,
-      history: messages,
-    }))
+    wsRef.current.send(JSON.stringify({ message: cur, history: messages }))
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
-    }
-  }
+  const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr)
-    const now = new Date()
-    const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
-    if (diffDays === 0) return 'Today'
-    if (diffDays === 1) return 'Yesterday'
-    if (diffDays < 7) return `${diffDays} days ago`
-    return date.toLocaleDateString()
+  const formatDate = (d: string) => {
+    const diff = Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
+    if (diff === 0) return 'Today'; if (diff === 1) return 'Yesterday'
+    if (diff < 7) return `${diff} days ago`; return new Date(d).toLocaleDateString()
   }
 
   return (
-    <div className="flex h-screen bg-gray-950 text-white overflow-hidden relative">
+    <div className="flex h-screen bg-[#f8faff] text-gray-900 overflow-hidden">
 
-      {/* Toast Notifications */}
+      {/* Toasts */}
       <div className="fixed top-4 right-4 z-[100] space-y-2">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-slide-in ${toast.type === 'success' ? 'bg-green-600 text-white' :
-                toast.type === 'error' ? 'bg-red-600 text-white' :
-                  'bg-blue-600 text-white'
-              }`}
-          >
-            {toast.message}
+        {toasts.map(t => (
+          <div key={t.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-slide-in text-white ${t.type === 'success' ? 'bg-green-600' : t.type === 'error' ? 'bg-red-500' : 'bg-blue-600'}`}>
+            {t.message}
           </div>
         ))}
       </div>
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Modal */}
       {deleteConfirm && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-sm shadow-2xl">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white border border-gray-200 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <FiTrash2 className="h-5 w-5 text-red-500" />
               </div>
-              <h3 className="text-lg font-semibold text-white">Delete Chat</h3>
+              <h3 className="text-lg font-semibold text-[#1e3a5f]">Delete Chat</h3>
             </div>
-            <p className="text-gray-400 text-sm mb-6">
-              Are you sure you want to delete this chat? This action cannot be undone.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button onClick={handleDeleteCancel} className="flex-1 px-4 py-2 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 text-sm font-medium transition-colors">
-                Cancel
-              </button>
-              <button onClick={handleDeleteConfirm} className="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 text-sm font-medium transition-colors">
-                Delete
-              </button>
+            <p className="text-gray-500 text-sm mb-6">Are you sure? This cannot be undone.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteConfirm(null)} className="flex-1 px-4 py-2.5 rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 text-sm font-medium transition-colors">Cancel</button>
+              <button onClick={handleDeleteConfirm} className="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white hover:bg-red-600 text-sm font-medium transition-colors">Delete</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Sidebar Overlay (Mobile) */}
-      {isSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
+      {/* Sidebar overlay */}
+      {isSidebarOpen && <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
 
       {/* Sidebar */}
-      <div className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-gray-900 border-r border-gray-800 flex flex-col transition-transform duration-300 transform
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-        lg:relative lg:translate-x-0
-      `}>
-        <div className="p-4 border-b border-gray-800 flex items-center justify-between lg:block">
-          <div>
-            <h2 className="text-base font-bold text-blue-400">InfoMary</h2>
-            <p className="text-[10px] text-gray-500 lg:mb-3">Senior Care Navigation</p>
+      <div className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 flex flex-col transition-transform duration-300 shadow-xl ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:relative lg:translate-x-0 lg:shadow-none`}>
+        <div className="p-4 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-3">
+            <Link href="/" className="flex items-center gap-2">
+              <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center shrink-0">
+                <span className="text-white text-xs font-bold">IS</span>
+              </div>
+              <span className="text-sm font-bold text-[#1e3a5f]">InfoSenior<span className="text-blue-500">.care</span></span>
+            </Link>
+            <button onClick={() => setIsSidebarOpen(false)} className="p-1.5 text-gray-400 hover:text-gray-600 lg:hidden rounded-lg hover:bg-gray-100 transition-colors">
+              <FiX className="h-5 w-5" />
+            </button>
           </div>
-          <button
-            onClick={() => setIsSidebarOpen(false)}
-            className="p-2 text-gray-400 hover:text-white lg:hidden"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-          <button onClick={startNewChat} className="w-full bg-blue-600 text-white rounded-lg py-2 text-xs hover:bg-blue-700 mt-2 lg:mt-0">
+          <button onClick={startNewChat} className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2.5 text-sm font-semibold transition-colors shadow-sm shadow-blue-600/20">
             + New Chat
           </button>
         </div>
+
         <div className="flex-1 overflow-y-auto p-3">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Recent Chats</h3>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2 px-1">Recent Chats</p>
           <div className="space-y-1">
-            {sessions.map((session) => (
-              <div
-                key={session.session_id}
-                className={`group relative rounded-lg transition-colors ${sessionId === session.session_id ? 'bg-gray-800 border-l-2 border-blue-500' : 'hover:bg-gray-800'
-                  }`}
-              >
-                <button onClick={() => loadSession(session.session_id)} className="w-full text-left p-3 pr-8">
-                  <div className="text-sm font-medium text-gray-200 truncate">{session.title}</div>
-                  {session.description && (
-                    <div className="text-xs text-gray-500 truncate mt-1">{session.description}</div>
-                  )}
-                  <div className="text-xs text-gray-600 mt-1">{formatDate(session.created_at)}</div>
+            {sessions.map(s => (
+              <div key={s.session_id} className={`group relative rounded-xl transition-colors ${sessionId === s.session_id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50 border border-transparent'}`}>
+                <button onClick={() => loadSession(s.session_id)} className="w-full text-left p-3 pr-8">
+                  <div className={`text-sm font-medium truncate ${sessionId === s.session_id ? 'text-blue-700' : 'text-gray-700'}`}>{s.title}</div>
+                  {s.description && <div className="text-xs text-gray-400 truncate mt-0.5">{s.description}</div>}
+                  <div className="text-xs text-gray-400 mt-1">{formatDate(s.created_at)}</div>
                 </button>
-                <button
-                  onClick={(e) => handleDeleteClick(e, session.session_id)}
-                  className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-900/50 text-gray-500 hover:text-red-400 transition-all"
-                  title="Delete chat"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
+                <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(s.session_id) }} className="absolute top-2.5 right-2 p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-100 text-gray-400 hover:text-red-500 transition-all">
+                  <FiTrash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             ))}
-            {sessions.length === 0 && (
-              <div className="text-xs text-gray-600 text-center py-4">No previous chats</div>
-            )}
+            {sessions.length === 0 && <div className="text-xs text-gray-400 text-center py-6">No previous chats</div>}
           </div>
         </div>
-        <div className="p-3 border-t border-gray-800">
-          <Link href="/" className="text-xs text-gray-500 hover:text-gray-300 block py-2">
-            🎙️ Voice Agent
+
+        <div className="p-3 border-t border-gray-100 space-y-1">
+          <Link href="/voice" className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600 py-2 px-3 rounded-xl hover:bg-blue-50 transition-colors">
+            <FiMic className="w-4 h-4" /> Voice Agent
           </Link>
-          <Link href="/chat" className="text-xs text-blue-400 font-semibold block py-2">
-            Text Agent
-          </Link>
+          
+          
         </div>
       </div>
 
-      {/* Main Content Area */}
+      {/* Main */}
       <div className="flex-1 flex flex-col h-full min-w-0">
         {/* Header */}
-        <div className="bg-gray-900 border-b border-gray-800 p-3 lg:p-4 flex items-center gap-3">
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            className="p-2 text-gray-400 hover:text-white lg:hidden flex-shrink-0"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+        <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 shadow-sm">
+          <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-gray-500 hover:text-[#1e3a5f] lg:hidden shrink-0 rounded-lg hover:bg-gray-100 transition-colors">
+            <FiMenu className="h-5 w-5" />
           </button>
-          <div className="min-w-0">
-            <h1 className="text-base lg:text-lg font-bold text-blue-400 truncate">InfoSenior.care</h1>
-            <p className="text-[10px] lg:text-xs text-gray-500 truncate">AI-Powered Senior Care Assistant</p>
+          <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+            <RiNurseLine className="w-4 h-4 text-white" />
           </div>
+          <div className="min-w-0 ">
+            <h1 className="text-sm font-bold text-[#1e3a5f] truncate">Infomary</h1>
+            <div className="flex items-center gap-1.5">
+              <div className={`w-1.5 h-1.5 rounded-full ${
+                wsStatus === 'connected' ? 'bg-green-500' :
+                wsStatus === 'reconnecting' ? 'bg-yellow-500 animate-pulse' :
+                wsStatus === 'connecting' ? 'bg-blue-400 animate-pulse' :
+                'bg-red-400'
+              }`} />
+              <p className="text-xs text-gray-400">
+                {wsStatus === 'connected' ? 'Online' :
+                 wsStatus === 'reconnecting' ? 'Reconnecting...' :
+                 wsStatus === 'connecting' ? 'Connecting...' :
+                 'Disconnected'}
+              </p>
+            </div>
+          </div>
+          <Link href="/" className="ml-auto flex items-center gap-1.5 text-xs text-gray-400 hover:text-blue-600 transition-colors  sm:flex shrink-0">
+            <FiHome className="w-3.5 h-3.5" /> Home
+          </Link>
+          <Link href="/voice" className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-blue-600 transition-colors hidden sm:flex shrink-0 pr-6">
+            <FiMic className="w-3.5 h-3.5" /> Voice Agent
+          </Link>
         </div>
+
+        {/* Connection status banner */}
+        {wsStatus === 'disconnected' && (
+          <div className="bg-red-50 border-b border-red-100 px-4 py-2.5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-red-400 rounded-full shrink-0" />
+              <p className="text-xs font-medium text-red-600">Connection lost — messages won&apos;t send until reconnected</p>
+            </div>
+            <button
+              onClick={() => { reconnectAttemptsRef.current = 0; connectWebSocket(sessionId) }}
+              className="text-xs font-semibold text-red-600 hover:text-red-700 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors shrink-0"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {wsStatus === 'reconnecting' && (
+          <div className="bg-yellow-50 border-b border-yellow-100 px-4 py-2.5 flex items-center gap-2">
+            <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse shrink-0" />
+            <p className="text-xs font-medium text-yellow-700">Reconnecting automatically...</p>
+          </div>
+        )}
+
+        {/* Pending message recovery */}
+        {pendingMessage && wsStatus === 'connected' && (
+          <div className="bg-blue-50 border-b border-blue-100 px-4 py-2.5 flex items-center justify-between gap-3">
+            <p className="text-xs text-blue-600 truncate">
+              Unsent message recovered: <span className="font-medium">&ldquo;{pendingMessage.slice(0, 60)}{pendingMessage.length > 60 ? '...' : ''}&rdquo;</span>
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => { setInput(pendingMessage); setPendingMessage(null); localStorage.removeItem(`pending_${sessionId}`) }}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-100 hover:bg-blue-200 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Restore
+              </button>
+              <button
+                onClick={() => { setPendingMessage(null); localStorage.removeItem(`pending_${sessionId}`) }}
+                className="text-xs text-blue-400 hover:text-blue-600 px-2 py-1.5 rounded-lg transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-4">
           {loadingHistory ? (
             <div className="flex justify-center items-center h-full">
-              <div className="flex gap-2 items-center">
-                <div className="w-3 h-3 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="w-3 h-3 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="w-3 h-3 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
+              <div className="flex gap-2">{[0,150,300].map(d => <div key={d} className="w-3 h-3 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
             </div>
           ) : (
             <>
               {messages.map((msg, i) => (
                 <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   {msg.role === 'assistant' && (
-                    <div className="w-7 h-7 lg:w-8 lg:h-8 rounded-full bg-blue-600 flex items-center justify-center text-[10px] lg:text-sm mr-2 lg:mr-3 flex-shrink-0 mt-1">
-                      🩺
+                    <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center mr-2 shrink-0 mt-1 shadow-sm">
+                      <RiNurseLine className="w-4 h-4 text-white" />
                     </div>
                   )}
-                  <div className={`max-w-[85%] lg:max-w-2xl px-3 py-2 lg:px-4 lg:py-3 rounded-2xl text-xs lg:text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-gray-800 text-gray-100 rounded-tl-sm border border-gray-700/50'
-                    }`}>
+                  <div className={`max-w-[85%] lg:max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-white text-gray-800 rounded-tl-sm border border-gray-200'}`}>
                     {msg.role === 'assistant' ? (
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         rehypePlugins={[rehypeRaw]}
                         components={{
-                          h1: ({ ...props }) => <h1 className="text-lg lg:text-xl font-bold my-2 text-blue-400" {...props} />,
-                          h2: ({ ...props }) => <h2 className="text-md lg:text-lg font-bold my-2 text-blue-400" {...props} />,
-                          h3: ({ ...props }) => <h3 className="text-sm lg:text-md font-bold my-2 text-blue-400" {...props} />,
-                          p: ({ ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                          strong: ({ ...props }) => <strong className="font-bold text-blue-300" {...props} />,
-                          em: ({ ...props }) => <em className="italic text-gray-300" {...props} />,
-                          ul: ({ ...props }) => <ul className="list-disc pl-4 mb-2" {...props} />,
-                          ol: ({ ...props }) => <ol className="list-decimal pl-4 mb-2" {...props} />,
-                          li: ({ ...props }) => <li className="mb-1" {...props} />,
-                          a: ({ ...props }) => <a className="text-blue-400 underline hover:text-blue-300 transition-colors" target="_blank" rel="noreferrer" {...props} />,
-                          blockquote: ({ ...props }) => <blockquote className="border-l-4 border-gray-600 pl-4 italic my-2 text-gray-400" {...props} />,
-                          hr: () => <hr className="my-4 border-gray-700" />,
-                          table: ({ ...props }) => (
-                            <div className="overflow-x-auto my-4 border border-gray-700 rounded-lg shadow-sm">
-                              <table className="min-w-full divide-y divide-gray-700" {...props} />
-                            </div>
-                          ),
-                          thead: ({ ...props }) => <thead className="bg-gray-900" {...props} />,
-                          tbody: ({ ...props }) => <tbody className="divide-y divide-gray-700" {...props} />,
-                          tr: ({ ...props }) => <tr className="hover:bg-gray-700/50 transition-colors" {...props} />,
-                          th: ({ ...props }) => <th className="px-3 lg:px-4 py-2 text-left text-[10px] lg:text-xs font-semibold text-gray-300 uppercase tracking-wider" {...props} />,
-                          td: ({ ...props }) => <td className="px-3 lg:px-4 py-2 text-[10px] lg:text-xs text-gray-300 whitespace-pre-wrap" {...props} />,
-                          code({
-                            className,
-                            children,
-                            ...props
-                          }: {
-                            className?: string;
-                            children?: ReactNode;
-                          } & HTMLAttributes<HTMLElement>) {
-                            const match = /language-(\w+)/.exec(className || '');
-                            const isInline = !match;
-                            if (!isInline && match) {
-                              return (
-                                <SyntaxHighlighter
-                                  language={match[1]}
-                                  style={dracula}
-                                  PreTag="div"
-                                  className="rounded-md my-2 lg:my-4 text-[10px] lg:text-xs"
-                                >
-                                  {String(children).replace(/\n$/, "")}
-                                </SyntaxHighlighter>
-                              );
-                            } else {
-                              return (
-                                <code
-                                  className="bg-gray-900 px-1.5 py-0.5 rounded text-[10px] lg:text-xs font-mono text-blue-300"
-                                  {...props}
-                                >
-                                  {children}
-                                </code>
-                              );
-                            }
+                          h1: ({ ...p }) => <h1 className="text-lg font-bold my-2 text-[#1e3a5f]" {...p} />,
+                          h2: ({ ...p }) => <h2 className="text-base font-bold my-2 text-[#1e3a5f]" {...p} />,
+                          h3: ({ ...p }) => <h3 className="text-sm font-bold my-2 text-[#1e3a5f]" {...p} />,
+                          p: ({ ...p }) => <p className="mb-2 last:mb-0" {...p} />,
+                          strong: ({ ...p }) => <strong className="font-bold text-blue-700" {...p} />,
+                          em: ({ ...p }) => <em className="italic text-gray-500" {...p} />,
+                          ul: ({ ...p }) => <ul className="list-disc pl-4 mb-2" {...p} />,
+                          ol: ({ ...p }) => <ol className="list-decimal pl-4 mb-2" {...p} />,
+                          li: ({ ...p }) => <li className="mb-1" {...p} />,
+                          a: ({ ...p }) => <a className="text-blue-600 underline hover:text-blue-700" target="_blank" rel="noreferrer" {...p} />,
+                          blockquote: ({ ...p }) => <blockquote className="border-l-4 border-blue-200 pl-4 italic my-2 text-gray-500" {...p} />,
+                          hr: () => <hr className="my-4 border-gray-200" />,
+                          table: ({ ...p }) => <div className="overflow-x-auto my-4 border border-gray-200 rounded-xl"><table className="min-w-full divide-y divide-gray-200" {...p} /></div>,
+                          thead: ({ ...p }) => <thead className="bg-gray-50" {...p} />,
+                          tbody: ({ ...p }) => <tbody className="divide-y divide-gray-100" {...p} />,
+                          tr: ({ ...p }) => <tr className="hover:bg-gray-50" {...p} />,
+                          th: ({ ...p }) => <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" {...p} />,
+                          td: ({ ...p }) => <td className="px-4 py-2 text-xs text-gray-600 whitespace-pre-wrap" {...p} />,
+                          code({ className, children, ...props }: { className?: string; children?: ReactNode } & HTMLAttributes<HTMLElement>) {
+                            const match = /language-(\w+)/.exec(className || '')
+                            if (match) return <SyntaxHighlighter language={match[1]} style={dracula} PreTag="div" className="rounded-xl my-3 text-xs">{String(children).replace(/\n$/, '')}</SyntaxHighlighter>
+                            return <code className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-xs font-mono" {...props}>{children}</code>
                           },
                         }}
-                      >
-                        {msg.content}
-                      </ReactMarkdown>
-                    ) : (
-                      msg.content
-                    )}
+                      >{msg.content}</ReactMarkdown>
+                    ) : msg.content}
                   </div>
                 </div>
               ))}
               {loading && (
                 <div className="flex justify-start">
-                  <div className="w-7 h-7 lg:w-8 lg:h-8 rounded-full bg-blue-600 flex items-center justify-center text-[10px] lg:text-sm mr-2 lg:mr-3 flex-shrink-0">
-                    🩺
-                  </div>
-                  <div className="bg-gray-800 px-4 py-2 lg:py-3 rounded-2xl rounded-tl-sm border border-gray-700/50">
-                    <div className="flex gap-1 items-center h-4">
-                      <div className="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="w-1.5 h-1.5 lg:w-2 lg:h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
+                  <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center mr-2 shrink-0 shadow-sm"><RiNurseLine className="w-4 h-4 text-white" /></div>
+                  <div className="bg-white px-4 py-3 rounded-2xl rounded-tl-sm border border-gray-200 shadow-sm">
+                    <div className="flex gap-1 items-center h-4">{[0,150,300].map(d => <div key={d} className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
                   </div>
                 </div>
               )}
@@ -544,27 +433,20 @@ function ChatPageInner() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
-        <div className="bg-gray-900 border-t border-gray-800 p-3 lg:p-4">
+        {/* Input */}
+        <div className="bg-white border-t border-gray-200 p-3 lg:p-4 shadow-sm">
           <div className="flex gap-2 lg:gap-3 items-end max-w-4xl mx-auto">
             <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type your message..."
+              value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
+              placeholder="Ask Infomary about senior care options..."
               rows={1}
-              className="flex-1 bg-gray-800 text-white placeholder-gray-500 rounded-xl px-4 py-2.5 lg:py-3 text-xs lg:text-sm resize-none outline-none border border-gray-700 focus:border-blue-500 transition-colors"
+              className="flex-1 bg-gray-50 text-gray-800 placeholder-gray-400 rounded-xl px-4 py-3 text-sm resize-none outline-none border border-gray-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all"
             />
-            <button
-              onClick={sendMessage}
-              disabled={loading || !input.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 lg:px-6 py-2.5 lg:py-3 rounded-xl text-xs lg:text-sm font-semibold transition-colors flex-shrink-0"
-            >
+            <button onClick={sendMessage} disabled={loading || !input.trim()} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-5 py-3 rounded-xl text-sm font-semibold transition-colors shrink-0 shadow-sm shadow-blue-600/20">
               Send
             </button>
           </div>
-          <p className="text-[10px] text-gray-600 text-center mt-2 lg:hidden">Enter to send</p>
-          <p className="hidden lg:block text-[10px] text-gray-600 text-center mt-2">Press Enter to send, Shift+Enter for new line</p>
+          <p className="text-xs text-gray-400 text-center mt-2">Enter to send · Shift+Enter for new line</p>
         </div>
       </div>
     </div>
@@ -574,12 +456,8 @@ function ChatPageInner() {
 export default function ChatPage() {
   return (
     <Suspense fallback={
-      <div className="flex h-screen bg-gray-950 text-white items-center justify-center">
-        <div className="flex gap-2">
-          <div className="w-3 h-3 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-          <div className="w-3 h-3 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-          <div className="w-3 h-3 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-        </div>
+      <div className="flex h-screen bg-[#f8faff] items-center justify-center">
+        <div className="flex gap-2">{[0,150,300].map(d => <div key={d} className="w-3 h-3 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
       </div>
     }>
       <ChatPageInner />
