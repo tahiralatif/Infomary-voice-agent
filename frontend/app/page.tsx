@@ -164,7 +164,7 @@ export default function Home() {
               Text Chat
             </Link> */}
             <Link href="/chat" className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-all shadow-lg shadow-blue-600/30">
-              <span className="flex items-center gap-2"><FiMic className="w-4 h-4" /> Talk to Infomary</span>
+              <span className="flex items-center gap-2"> Talk to Infomary</span>
             </Link>
             <Link href="/dashboard" className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-all shadow-lg shadow-blue-600/30">
               <span className="flex items-center gap-2">Dashboard</span>
