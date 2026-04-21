@@ -1,26 +1,31 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from tools.agent_tools import google_search, save_lead
-from database import init_db_pool, close_db_pool, save_message, fetch_history, update_session_title, get_all_sessions, delete_session
+from database import init_db_pool, close_db_pool, save_message, fetch_history, update_session_title, get_all_sessions, delete_session, get_dashboard_stats, get_all_leads, update_lead_status
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+from logger import log_startup, log_ws, log_llm, log_tool, log_api, log_error, log_success, log_warn, log_divider
 import os
-import logging
+import time
 import json
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_divider("INFOMARY BACKEND STARTING")
+    log_startup("Initializing database pool...")
     await init_db_pool()
+    log_startup(f"LLM model: openai/gpt-oss-120b")
+    log_startup(f"Tools bound: google_search, save_lead")
+    log_divider("READY")
     yield
+    log_startup("Shutting down — closing DB pool...")
     await close_db_pool()
+    log_startup("Shutdown complete.")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -346,8 +351,9 @@ User should feel:
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
-    logger.info(f"✅[WS] Connected Successfully: {session_id}")
-    
+    log_divider(f"SESSION {session_id[:12]}")
+    log_ws(f"Client connected  │ session={session_id}")
+
     personalized_prompt = system_prompt + f"\n\nYour session_id for this conversation is: {session_id}\nYou MUST pass this exact session_id in every single save_lead tool call."
 
     try:
@@ -355,8 +361,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             data = await websocket.receive_json()
             user_message = data.get("message", "")
             history = data.get("history", [])
-            
-            logger.info(f"[WS] Message from {session_id}: {user_message}")
+
+            log_ws(f"[{session_id[:8]}] user: {user_message[:80]}")
 
             messages = [SystemMessage(content=personalized_prompt)]
             for msg in history:
@@ -369,24 +375,34 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             await save_message(session_id, "user", user_message)
 
             response = None
+            t_start = time.time()
+
             for i in range(5):
-                logger.info(f"[LLM] Iteration {i+1}")
                 response = await llm.ainvoke(messages)
                 if hasattr(response, 'tool_calls') and response.tool_calls:
                     messages.append(response)
                     for tc in response.tool_calls:
+                        tool_name = tc["name"]
+                        tool_args = tc["args"]
+                        log_tool(f"[{session_id[:8]}] {tool_name} | {json.dumps(tool_args, default=str)[:120]}")
+                        t_tool = time.time()
                         try:
-                            if tc["name"] == "google_search":
-                                result = await google_search.ainvoke(tc["args"])
-                            elif tc["name"] == "save_lead":
-                                result = await save_lead.ainvoke(tc["args"])
+                            if tool_name == "google_search":
+                                result = await google_search.ainvoke(tool_args)
+                            elif tool_name == "save_lead":
+                                result = await save_lead.ainvoke(tool_args)
                             else:
                                 result = "Unknown tool"
+                                log_warn(f"Unknown tool: {tool_name}")
+                            ms = int((time.time() - t_tool) * 1000)
+                            log_tool(f"[{session_id[:8]}] {tool_name} done | {ms}ms")
                             messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
                         except Exception as e:
-                            logger.error(f"[TOOLS] Error: {e}")
+                            log_error(f"Tool error | {tool_name} | {e}")
                             messages.append(ToolMessage(content=str(e), tool_call_id=tc["id"]))
                 else:
+                    total_ms = int((time.time() - t_start) * 1000)
+                    log_llm(f"[{session_id[:8]}] response | {total_ms}ms | {len(response.content)} chars")
                     break
 
             output = response.content if response else "Something went wrong, please try again."
@@ -394,9 +410,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             await websocket.send_json({"response": output})
 
     except WebSocketDisconnect:
-        logger.info(f"[WS] Disconnected: {session_id}")
+        log_ws(f"Client disconnected │ session={session_id}")
     except Exception as e:
-        logger.error(f"[WS] Error: {e}")
+        log_error(f"WebSocket error   │ session={session_id} │ {e}")
         await websocket.send_json({"response": "Something went wrong."})
 
 # ─── Voice Agent Tools ─────────────────────────────────────────
@@ -406,31 +422,72 @@ class SpeechmaticsToolCall(BaseModel):
 
 @app.post("/speechmatics-tools")
 async def speechmatics_tools(req: SpeechmaticsToolCall):
+    log_tool(f"Speechmatics tool │ name={req.tool_name} │ args={json.dumps(req.args, default=str)[:200]}")
+    t = time.time()
     try:
         if req.tool_name == "google_search":
             result = await google_search.ainvoke(req.args)
         elif req.tool_name == "save_lead":
             result = await save_lead.ainvoke(req.args)
         else:
+            log_warn(f"Unknown tool: {req.tool_name}")
             return {"error": f"Unknown tool: {req.tool_name}"}
+        ms = int((time.time() - t) * 1000)
+        log_tool(f"Tool complete     │ name={req.tool_name} │ took={ms}ms")
         return {"result": str(result)}
     except Exception as e:
+        log_error(f"Speechmatics tool failed │ name={req.tool_name} │ {e}")
         return {"error": str(e)}
 
 # ─── Utility Routes ────────────────────────────────────────────
 @app.get("/")
 def health():
+    log_api("Health check")
     return {"status": "Infomary backend running!"}
+
+@app.get("/test-supabase")
+async def test_supabase():
+    """Quick test to verify Supabase lead write works."""
+    from database import upsert_lead, db_pool
+    log_api(f"Supabase test | pool_ready={db_pool is not None}")
+    try:
+        await upsert_lead({
+            "lead_id": "TEST-001",
+            "session_id": "test-session",
+            "name": "Test User",
+            "email": "test@test.com",
+            "phone": "555-0000",
+            "care_need": "Test lead from /test-supabase",
+            "care_type": "Assisted Living",
+            "location": "Chicago, IL",
+            "age": "75", "gender": "", "living_arrangement": "",
+            "conditions": "", "insurance": "", "budget": "",
+            "notes": "Manual test", "status": "New", "email_sent": False,
+        })
+        log_api("Supabase test PASSED")
+        return {"status": "ok", "message": "Lead written to Supabase successfully"}
+    except Exception as e:
+        log_error(f"Supabase test FAILED | {type(e).__name__}: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.get("/history/{session_id}")
 async def get_history(session_id: str):
-    messages = await fetch_history(session_id)
-    return {"messages": messages}
+    log_api(f"Fetch history | session={session_id[:12]}")
+    try:
+        messages = await fetch_history(session_id)
+        return {"messages": messages}
+    except Exception as e:
+        log_error(f"get_history failed | session={session_id[:12]} | {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch history")
 
 @app.get("/sessions")
 async def get_sessions():
-    sessions = await get_all_sessions()
-    return {"sessions": sessions}
+    try:
+        sessions = await get_all_sessions()
+        return {"sessions": sessions}
+    except Exception as e:
+        log_error(f"get_sessions failed | {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch sessions")
 
 class GenerateTitleRequest(BaseModel):
     session_id: str
@@ -439,26 +496,70 @@ class GenerateTitleRequest(BaseModel):
 
 @app.post("/generate-title")
 async def generate_title(req: GenerateTitleRequest):
-    title_llm = ChatGroq(
-        api_key=os.getenv("GROQ_API_KEY"),
-        model="llama-3.3-70b-versatile",
-        temperature=0.3,
-    )
-    prompt = f"Generate a SHORT title and description for this chat: {req.user_message} | {req.ai_response}. Format: Title: [X] Description: [Y]"
-    response = await title_llm.ainvoke(prompt)
-    content = response.content
-    title = "New Conversation"
-    description = ""
-    for line in content.split("\n"):
-        if line.startswith("Title:"): title = line.replace("Title:", "").strip()
-        elif line.startswith("Description:"): description = line.replace("Description:", "").strip()
-    await update_session_title(req.session_id, title, description)
-    return {"title": title, "description": description}
+    try:
+        log_api(f"Generate title | session={req.session_id[:12]}")
+        title_llm = ChatGroq(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.3-70b-versatile", temperature=0.3)
+        prompt = f"Generate a SHORT title and description for this chat: {req.user_message} | {req.ai_response}. Format: Title: [X] Description: [Y]"
+        response = await title_llm.ainvoke(prompt)
+        title, description = "New Conversation", ""
+        for line in response.content.split("\n"):
+            if line.startswith("Title:"): title = line.replace("Title:", "").strip()
+            elif line.startswith("Description:"): description = line.replace("Description:", "").strip()
+        await update_session_title(req.session_id, title, description)
+        return {"title": title, "description": description}
+    except Exception as e:
+        log_error(f"generate_title failed | session={req.session_id[:12]} | {e}")
+        return {"title": "New Conversation", "description": ""}
 
 class DeleteSessionRequest(BaseModel):
     session_id: str
 
+class UpdateLeadStatusRequest(BaseModel):
+    lead_id: str
+    status: str
+    
 @app.post("/delete-session")
 async def delete_session_endpoint(req: DeleteSessionRequest):
-    await delete_session(req.session_id)
-    return {"status": "deleted"}
+    try:
+        log_api(f"Delete session | session={req.session_id[:12]}")
+        await delete_session(req.session_id)
+        return {"status": "deleted"}
+    except Exception as e:
+        log_error(f"delete_session failed | session={req.session_id[:12]} | {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete session")
+
+# ─── Dashboard Routes ──────────────────────────────────────────
+@app.get("/dashboard/stats")
+async def dashboard_stats():
+    try:
+        stats = await get_dashboard_stats()
+        return stats
+    except Exception as e:
+        log_error(f"dashboard_stats failed | {e}")
+        raise HTTPException(status_code=503, detail="Dashboard unavailable — DB may be down")
+
+@app.get("/dashboard/leads")
+async def dashboard_leads(limit: int = 100, offset: int = 0, status: str = None):
+    try:
+        leads = await get_all_leads(limit=limit, offset=offset, status=status)
+        for lead in leads:
+            for k, v in lead.items():
+                if hasattr(v, 'isoformat'):
+                    lead[k] = v.isoformat()
+        return {"leads": leads}
+    except Exception as e:
+        log_error(f"dashboard_leads failed | {e}")
+        raise HTTPException(status_code=503, detail="Failed to fetch leads")
+
+@app.post("/dashboard/leads/status")
+async def update_status(req: UpdateLeadStatusRequest):
+    valid = ['New', 'Contacted', 'Qualified', 'Converted', 'Not Interested']
+    if req.status not in valid:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid}")
+    try:
+        log_api(f"Update status | lead={req.lead_id} | {req.status}")
+        await update_lead_status(req.lead_id, req.status)
+        return {"status": "updated"}
+    except Exception as e:
+        log_error(f"update_status failed | lead={req.lead_id} | {e}")
+        raise HTTPException(status_code=500, detail="Failed to update status")
