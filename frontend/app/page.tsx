@@ -208,8 +208,8 @@ export default function Home() {
       <section className="relative min-h-screen flex items-center overflow-hidden">
         <div className="absolute inset-0">
           <Image
-            src="https://images.unsplash.com/photo-1576765608535-5f04d1e3f289?w=1600&q=85"
-            alt="Caregiver with senior"
+            src="https://images.unsplash.com/photo-1666887360726-f55472d96c34?w=1600&q=85"
+            alt="Male doctor consulting male patient"
             fill className="object-cover object-center" unoptimized priority
           />
           <div className="absolute inset-0 bg-linear-to-r from-[#0f2240]/95 via-[#1e3a5f]/80 to-[#1e3a5f]/40 lg:to-transparent" />
@@ -335,18 +335,18 @@ export default function Home() {
           <div className="grid sm:grid-cols-2 gap-4 sm:gap-6 mb-4 sm:mb-6">
             <CarouselCard
               slides={[
-                { img: 'https://images.unsplash.com/photo-1576765608535-5f04d1e3f289?w=800&q=85', tag: 'Most Requested', tagColor: 'bg-blue-600', title: 'In-Home Care', desc: 'Personalized daily assistance so your loved one can stay safely and comfortably at home — on their own terms.' },
-                { img: 'https://images.unsplash.com/photo-1582750433449-648ed127bb54?w=800&q=85', tag: 'Compassionate', tagColor: 'bg-emerald-600', title: 'Companion Care', desc: 'Meaningful social engagement and emotional support to combat isolation and loneliness.' },
-                { img: 'https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=800&q=85', tag: '24/7 Support', tagColor: 'bg-indigo-600', title: 'Around-the-Clock Care', desc: 'Professional caregivers available day and night to ensure safety and comfort at home.' },
-                { img: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=800&q=85', tag: 'Post-Hospital', tagColor: 'bg-orange-500', title: 'Recovery Care', desc: 'Skilled nursing and rehabilitation support to help your loved one recover with confidence.' },
+                { img: 'https://images.unsplash.com/photo-1535643302794-19c3804b874b?w=800&q=85', tag: 'Most Requested', tagColor: 'bg-blue-600', title: 'In-Home Care', desc: 'Personalized daily assistance so your loved one can stay safely and comfortably at home — on their own terms.' },
+                { img: 'https://images.unsplash.com/photo-1773227054034-29d0b017b72d?w=800&q=85', tag: 'Compassionate', tagColor: 'bg-emerald-600', title: 'Companion Care', desc: 'Meaningful social engagement and emotional support to combat isolation and loneliness.' },
+                { img: 'https://images.unsplash.com/photo-1572567981652-499b7f8ef218?w=800&q=85', tag: '24/7 Support', tagColor: 'bg-indigo-600', title: 'Around-the-Clock Care', desc: 'Professional caregivers available day and night to ensure safety and comfort at home.' },
+                { img: 'https://images.unsplash.com/photo-1683272468278-3ba6633c15a4?w=800&q=85', tag: 'Post-Hospital', tagColor: 'bg-orange-500', title: 'Recovery Care', desc: 'Skilled nursing and rehabilitation support to help your loved one recover with confidence.' },
               ]}
             />
             <CarouselCard
               slides={[
-                { img: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=800&q=85', tag: 'Specialized', tagColor: 'bg-violet-600', title: 'Memory Care', desc: "Specialized, compassionate support for Alzheimer's, dementia, and cognitive decline — in a safe, structured environment." },
-                { img: 'https://images.unsplash.com/photo-1576765608535-5f04d1e3f289?w=800&q=85', tag: 'Community Living', tagColor: 'bg-blue-600', title: 'Assisted Living', desc: 'Warm, supervised communities where seniors thrive with 24/7 professional support and social connection.' },
-                { img: 'https://images.unsplash.com/photo-1582750433449-648ed127bb54?w=800&q=85', tag: 'Licensed', tagColor: 'bg-teal-600', title: 'Skilled Nursing', desc: 'Licensed medical care, wound management, and post-hospital rehabilitation by certified professionals.' },
-                { img: 'https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=800&q=85', tag: 'Nationwide', tagColor: 'bg-rose-600', title: 'Respite Care', desc: 'Short-term relief for family caregivers — professional care so you can rest and recharge.' },
+                { img: 'https://images.unsplash.com/photo-1683272468278-3ba6633c15a4?w=800&q=85', tag: 'Specialized', tagColor: 'bg-violet-600', title: 'Memory Care', desc: "Specialized, compassionate support for Alzheimer's, dementia, and cognitive decline — in a safe, structured environment." },
+                { img: 'https://images.unsplash.com/photo-1535643302794-19c3804b874b?w=800&q=85', tag: 'Community Living', tagColor: 'bg-blue-600', title: 'Assisted Living', desc: 'Warm, supervised communities where seniors thrive with 24/7 professional support and social connection.' },
+                { img: 'https://images.unsplash.com/photo-1773227054034-29d0b017b72d?w=800&q=85', tag: 'Licensed', tagColor: 'bg-teal-600', title: 'Skilled Nursing', desc: 'Licensed medical care, wound management, and post-hospital rehabilitation by certified professionals.' },
+                { img: 'https://images.unsplash.com/photo-1572567981652-499b7f8ef218?w=800&q=85', tag: 'Nationwide', tagColor: 'bg-rose-600', title: 'Respite Care', desc: 'Short-term relief for family caregivers — professional care so you can rest and recharge.' },
               ]}
             />
           </div>
@@ -436,8 +436,8 @@ export default function Home() {
           <div className="relative mt-8 lg:mt-0">
             <div className="rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl">
               <Image
-                src="https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=800&q=85"
-                alt="Senior care consultation"
+                src="https://images.unsplash.com/photo-1683272468278-3ba6633c15a4?w=800&q=85"
+                alt="Senior men in consultation"
                 width={800} height={600}
                 className="w-full h-64 sm:h-80 lg:h-[500px] object-cover"
                 unoptimized
@@ -488,8 +488,8 @@ export default function Home() {
           <div className="relative mt-4 lg:mt-0">
             <div className="rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl">
               <Image
-                src="https://images.unsplash.com/photo-1582750433449-648ed127bb54?w=800&q=85"
-                alt="Senior with family"
+                src="https://images.unsplash.com/photo-1773227054034-29d0b017b72d?w=800&q=85"
+                alt="Elderly men together"
                 width={800} height={600}
                 className="w-full h-64 sm:h-80 lg:h-[480px] object-cover"
                 unoptimized
@@ -533,7 +533,7 @@ export default function Home() {
       {/* ── CTA ── */}
       <section className="relative py-16 sm:py-20 lg:py-24 px-4 sm:px-6 overflow-hidden">
         <div className="absolute inset-0">
-          <Image src="https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?w=1600&q=80" alt="bg" fill className="object-cover" unoptimized />
+          <Image src="https://images.unsplash.com/photo-1572567981652-499b7f8ef218?w=1600&q=80" alt="bg" fill className="object-cover" unoptimized />
           <div className="absolute inset-0 bg-[#1e3a5f]/90" />
         </div>
         <div className="relative max-w-3xl mx-auto text-center">

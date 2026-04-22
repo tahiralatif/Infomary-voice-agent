@@ -81,7 +81,10 @@ function ChatPageInner() {
   }, [addToast, generateTitle])
 
   const connectWebSocket = useCallback((sid: string) => {
-    if (wsRef.current) wsRef.current.close()
+    if (wsRef.current) {
+      wsRef.current.onclose = null
+      wsRef.current.close()
+    }
     setWsStatus('connecting')
     const wsUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000').replace('https://', 'wss://').replace('http://', 'ws://')
     const ws = new WebSocket(`${wsUrl}/ws/${sid}`)
@@ -169,7 +172,10 @@ function ChatPageInner() {
   useEffect(() => {
     if (sessionId) connectWebSocket(sessionId)
     return () => {
-      wsRef.current?.close()
+      if (wsRef.current) {
+        wsRef.current.onclose = null
+        wsRef.current.close()
+      }
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
     }
   }, [sessionId, connectWebSocket])
