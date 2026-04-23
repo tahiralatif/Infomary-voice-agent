@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react"
 import { Conversation } from "@elevenlabs/client"
-import { AnimatePresence, motion } from "motion/react"
+import { motion } from "motion/react"
 import {
   FiMic, FiMicOff, FiMessageSquare, FiHome,
   FiShield, FiHeart, FiUsers, FiMapPin, FiLock, FiPhone
