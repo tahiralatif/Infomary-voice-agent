@@ -244,6 +244,8 @@ async def _save_lead(
     # Save to Supabase
     try:
         import database as _db
+        if _db.db_pool is None:
+            await _db.init_db_pool()
         await _db.upsert_lead({**lead, "session_id": session_id, "email_sent": _sessions[session_id]["email_sent"]})
         log_lead(f"Supabase saved | lead={lead_id}")
     except Exception as e:

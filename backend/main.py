@@ -416,13 +416,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         await websocket.send_json({"response": "Something went wrong."})
 
 # ─── Voice Agent Tools ─────────────────────────────────────────
-class SpeechmaticsToolCall(BaseModel):
+class VoiceToolCall(BaseModel):
     tool_name: str
     args: dict
 
-@app.post("/speechmatics-tools")
-async def speechmatics_tools(req: SpeechmaticsToolCall):
-    log_tool(f"Speechmatics tool │ name={req.tool_name} │ args={json.dumps(req.args, default=str)[:200]}")
+@app.post("/voice-tools")
+async def voice_tools(req: VoiceToolCall):
+    log_tool(f"Voice tool │ name={req.tool_name} │ args={json.dumps(req.args, default=str)[:200]}")
     t = time.time()
     try:
         if req.tool_name == "google_search":
