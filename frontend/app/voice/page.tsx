@@ -23,16 +23,6 @@ export default function VoiceAgent() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const conversationRef = useRef<any>(null)
 
-  const callTool = useCallback(async (toolName: string, args: unknown) => {
-    const res = await fetch("/api/tools", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tool_name: toolName, args }),
-    })
-    const data = await res.json()
-    return String(data.result ?? data.error ?? "done")
-  }, [])
-
   const handleConnect = useCallback(async () => {
     setStatus("connecting")
     try {
@@ -52,8 +42,6 @@ export default function VoiceAgent() {
             conversationRef.current?.endSession()
             return "Call ended"
           },
-          save_lead: (params: unknown) => callTool("save_lead", params),
-          google_search: (params: unknown) => callTool("google_search", params),
         },
       })
 
@@ -62,7 +50,7 @@ export default function VoiceAgent() {
       console.error("Connection failed:", err)
       setStatus("disconnected")
     }
-  }, [sessionId, callTool])
+  }, [sessionId])
 
   const handleDisconnect = useCallback(async () => {
     await conversationRef.current?.endSession()
