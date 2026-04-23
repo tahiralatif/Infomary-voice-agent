@@ -436,7 +436,36 @@ async def voice_tools(req: VoiceToolCall):
         log_tool(f"Tool complete     │ name={req.tool_name} │ took={ms}ms")
         return {"result": str(result)}
     except Exception as e:
-        log_error(f"Speechmatics tool failed │ name={req.tool_name} │ {e}")
+        log_error(f"Voice tool failed │ name={req.tool_name} │ {e}")
+        return {"error": str(e)}
+
+# ─── ElevenLabs Server Tools (direct webhook endpoints) ────────
+from tools.agent_tools import SaveLeadInput, GoogleSearchInput
+
+@app.post("/tools/save_lead")
+async def tool_save_lead(req: SaveLeadInput):
+    log_tool(f"ElevenLabs save_lead │ session={req.session_id[:12] if req.session_id else '?'}")
+    t = time.time()
+    try:
+        result = await save_lead.ainvoke(req.dict())
+        ms = int((time.time() - t) * 1000)
+        log_tool(f"save_lead done │ {ms}ms")
+        return {"result": str(result)}
+    except Exception as e:
+        log_error(f"save_lead failed │ {e}")
+        return {"error": str(e)}
+
+@app.post("/tools/google_search")
+async def tool_google_search(req: GoogleSearchInput):
+    log_tool(f"ElevenLabs google_search │ query={req.query[:80]}")
+    t = time.time()
+    try:
+        result = await google_search.ainvoke(req.dict())
+        ms = int((time.time() - t) * 1000)
+        log_tool(f"google_search done │ {ms}ms")
+        return {"result": str(result)}
+    except Exception as e:
+        log_error(f"google_search failed │ {e}")
         return {"error": str(e)}
 
 # ─── Utility Routes ────────────────────────────────────────────
