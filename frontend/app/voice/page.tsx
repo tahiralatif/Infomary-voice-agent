@@ -19,18 +19,19 @@ type AgentMode = "listening" | "speaking"
 export default function VoiceAgent() {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected")
   const [mode, setMode] = useState<AgentMode>("listening")
-  const [sessionId] = useState(() => `voice_${Math.random().toString(36).substring(7)}`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const conversationRef = useRef<any>(null)
 
   const handleConnect = useCallback(async () => {
     setStatus("connecting")
     try {
+      await navigator.mediaDevices.getUserMedia({ audio: true })
       const conversation = await Conversation.startSession({
         agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID!,
         connectionType: "websocket",
         onConnect: () => setStatus("connected"),
-        onDisconnect: () => {
+        onDisconnect: (details: unknown) => {
+          console.warn("ElevenLabs disconnected:", details)
           setStatus("disconnected")
           setMode("listening")
           conversationRef.current = null
@@ -50,7 +51,7 @@ export default function VoiceAgent() {
       console.error("Connection failed:", err)
       setStatus("disconnected")
     }
-  }, [sessionId])
+  }, [])
 
   const handleDisconnect = useCallback(async () => {
     await conversationRef.current?.endSession()

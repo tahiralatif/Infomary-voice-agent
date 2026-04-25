@@ -439,18 +439,30 @@ async def voice_tools(req: VoiceToolCall):
         log_error(f"Voice tool failed │ name={req.tool_name} │ {e}")
         return {"error": str(e)}
 
-# ─── ElevenLabs Server Tools (direct webhook endpoints) ────────
+# ─── ElevenLabs Webhook Tools ─────────────────────────────────
+# ElevenLabs sends: {"parameters": {...}, "conversation_id": "...", "agent_id": "..."}
 from tools.agent_tools import SaveLeadInput, GoogleSearchInput
 
+class ElevenLabsWebhookRequest(BaseModel):
+    parameters: dict = {}
+    conversation_id: str = ""
+    agent_id: str = ""
+
+    class Config:
+        extra = "allow"
+
 @app.post("/tools/save_lead")
-async def tool_save_lead(req: SaveLeadInput):
+async def tool_save_lead(req: ElevenLabsWebhookRequest):
     log_divider("TOOL CALL: save_lead")
-    log_tool(f"session={req.session_id or '?'} │ name={req.name or '?'} │ email={req.email or '?'} │ phone={req.phone or '?'}")
-    log_tool(f"care_need={req.care_need or '?'} │ location={req.location or '?'} │ age={req.age or '?'}")
-    log_tool(f"full payload={json.dumps(req.dict(), default=str)[:300]}")
+    params = req.parameters
+    log_tool(f"conversation={req.conversation_id[:12] if req.conversation_id else '?'}")
+    log_tool(f"session={params.get('session_id','?')} │ name={params.get('name','?')} │ email={params.get('email','?')} │ phone={params.get('phone','?')}")
+    log_tool(f"care_need={params.get('care_need','?')} │ location={params.get('location','?')} │ age={params.get('age','?')}")
+    log_tool(f"full payload={json.dumps(params, default=str)[:300]}")
     t = time.time()
     try:
-        result = await save_lead.ainvoke(req.dict())
+        save_input = SaveLeadInput(**params)
+        result = await save_lead.ainvoke(save_input.dict())
         ms = int((time.time() - t) * 1000)
         log_success(f"save_lead done │ {ms}ms │ result={result}")
         return {"result": str(result)}
@@ -459,12 +471,14 @@ async def tool_save_lead(req: SaveLeadInput):
         return {"error": str(e)}
 
 @app.post("/tools/google_search")
-async def tool_google_search(req: GoogleSearchInput):
+async def tool_google_search(req: ElevenLabsWebhookRequest):
     log_divider("TOOL CALL: google_search")
-    log_tool(f"query={req.query}")
+    params = req.parameters
+    log_tool(f"query={params.get('query','?')}")
     t = time.time()
     try:
-        result = await google_search.ainvoke(req.dict())
+        search_input = GoogleSearchInput(**params)
+        result = await google_search.ainvoke(search_input.dict())
         ms = int((time.time() - t) * 1000)
         log_success(f"google_search done │ {ms}ms │ results={len(result)} chars")
         return {"result": str(result)}
