@@ -1,6 +1,7 @@
 import os
 import uuid
 import asyncio
+import traceback
 from datetime import datetime
 from dotenv import load_dotenv
 import gspread
@@ -141,6 +142,64 @@ def _build_html_email(lead: dict) -> str:
 </table>
 </body></html>"""
 
+async def _send_lead_confirmation_email(lead: dict) -> dict:
+    """Send a warm confirmation email to the lead themselves."""
+    lead_email = lead.get("email", "").strip()
+    lead_name = lead.get("name", "Friend").strip()
+    if not lead_email:
+        return {"success": False, "error": "No email provided"}
+    log_email(f"Sending confirmation to lead │ {lead_name} │ {lead_email}")
+    t = time.time()
+    try:
+        resend.api_key = os.getenv("RESEND_API_KEY")
+        care_need = lead.get("care_need", "")
+        location = lead.get("location", "")
+        details_line = ""
+        if care_need:
+            details_line += f"<li>Care need: {care_need}</li>"
+        if location:
+            details_line += f"<li>Location: {location}</li>"
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/></head>
+<body style="margin:0;padding:0;background:#f4f6f9;font-family:'Segoe UI',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:40px 0;">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0"
+           style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+      <tr>
+        <td style="background:linear-gradient(135deg,#1a73e8,#0d47a1);padding:40px 48px;text-align:center;">
+          <h1 style="margin:0;color:#fff;font-size:26px;font-weight:700;">InfoSenior<span style="color:#90caf9;">.care</span></h1>
+          <p style="margin:8px 0 0;color:#bbdefb;font-size:13px;">Your Senior Care Journey Starts Here</p>
+        </td>
+      </tr>
+      <tr><td style="padding:40px 48px;">
+        <p style="font-size:16px;color:#1a1a2e;">Hi <strong>{lead_name}</strong>,</p>
+        <p style="color:#444;line-height:1.7;">Thank you for reaching out to <strong>InfoSenior.care</strong>. We've received your information and one of our senior care advisors will be in touch with you shortly — completely free of charge.</p>
+        {"<p style='color:#444;'>Here's a summary of what we noted:</p><ul style='color:#444;line-height:1.8;'>" + details_line + "</ul>" if details_line else ""}
+        <p style="color:#444;line-height:1.7;">In the meantime, if you have any questions, feel free to reply to this email or call us back anytime.</p>
+        <p style="color:#444;">Warm regards,<br/><strong>Infomary</strong><br/>InfoSenior.care</p>
+      </td></tr>
+      <tr><td style="border-top:1px solid #ebebeb;padding:24px 48px;text-align:center;">
+        <p style="margin:0;color:#999;font-size:12px;">InfoSenior.care — Helping families find the right senior care.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>"""
+        resend.Emails.send({
+            "from": "InfoSenior.care <onboarding@resend.dev>",
+            "to": lead_email,
+            "subject": f"We received your request, {lead_name} 💙",
+            "html": html,
+        })
+        ms = int((time.time() - t) * 1000)
+        log_success(f"Lead confirmation sent │ to={lead_email} │ {ms}ms")
+        return {"success": True}
+    except Exception as e:
+        log_error(f"Lead confirmation failed │ to={lead_email} │ {e}")
+        return {"success": False, "error": str(e)}
+
+
 async def _send_email(lead: dict) -> dict:
     log_email(f"Sending notification │ lead={lead.get('lead_id')} │ to={lead.get('name','?')} │ need={lead.get('care_need','?')[:60]}")
     t = time.time()
@@ -198,6 +257,50 @@ async def _upsert_sheet(lead: dict, session_id: str) -> dict:
         log_error(f"Sheet FAILED | lead={lead.get('lead_id')} | {e}")
         return {"success": False, "error": str(e)}
 
+async def _persist_lead(lead: dict, session_id: str, has_name: bool, has_contact: bool, has_email: bool, email_sent: bool):
+    """Shield-protected: runs even if parent function call is cancelled."""
+    lead_id = lead["lead_id"]
+
+    # 1. Supabase first (fast ~300ms)
+    try:
+        import database as _db
+        if _db.db_pool is None:
+            await _db.init_db_pool()
+        await _db.upsert_lead({
+            **lead,
+            "session_id": session_id,
+            "email_sent": _sessions.get(session_id, {}).get("email_sent", False),
+        })
+        log_lead(f"Supabase saved | lead={lead_id}")
+    except Exception as e:
+        log_error(f"Supabase FAILED | lead={lead_id} | {type(e).__name__}: {e}")
+        log_error(traceback.format_exc())
+
+    # 2. Send emails if name + (phone or email) received for first time
+    if has_name and has_contact and not email_sent:
+        result = await _send_email(lead)
+        if has_email:
+            await _send_lead_confirmation_email(lead)
+        if result.get("success"):
+            if session_id in _sessions:
+                _sessions[session_id]["email_sent"] = True
+            try:
+                import database as _db
+                await _db.upsert_lead({**lead, "session_id": session_id, "email_sent": True})
+            except Exception as e:
+                log_error(f"Supabase email_sent update FAILED | lead={lead_id} | {e}")
+
+    # 3. Google Sheet last (slow ~2-3s) — background, won't block anything
+    asyncio.create_task(_sheet_save_bg(lead, session_id))
+
+
+async def _sheet_save_bg(lead: dict, session_id: str):
+    try:
+        await _upsert_sheet(lead, session_id)
+    except Exception as e:
+        log_error(f"Sheet FAILED (bg) | lead={lead['lead_id']} | {e}")
+
+
 async def _save_lead(
     session_id: str = "",
     name: str = "", email: str = "", phone: str = "",
@@ -212,61 +315,54 @@ async def _save_lead(
 
     is_new = session_id not in _sessions
     if is_new:
-        _sessions[session_id] = {"lead_id": str(uuid.uuid4())[:8].upper(), "row_index": None, "email_sent": False}
+        _sessions[session_id] = {
+            "lead_id": str(uuid.uuid4())[:8].upper(),
+            "row_index": None,
+            "email_sent": False,
+            "data": {},
+        }
 
-    session    = _sessions[session_id]
-    lead_id    = session["lead_id"]
+    session = _sessions[session_id]
+    lead_id = session["lead_id"]
     email_sent = session["email_sent"]
-    action     = "new" if is_new else "update"
-    log_lead(f"save_lead [{action}] | lead={lead_id} | session={session_id[:12]}")
+    action = "new" if is_new else "update"
+
+    # Merge: only overwrite fields that are explicitly provided (non-empty)
+    new_fields = {
+        "name": name, "email": email, "phone": phone,
+        "care_need": care_need, "location": location, "notes": notes,
+        "age": age, "gender": gender, "living_arrangement": living_arrangement,
+        "physician": physician, "conditions": conditions,
+        "hospitalizations": hospitalizations, "medications": medications,
+        "allergies": allergies, "care_type": care_type, "care_hours": care_hours,
+        "insurance": insurance, "budget": budget, "home_hazards": home_hazards,
+        "medical_equipment": medical_equipment, "other_factors": other_factors,
+        "transportation": transportation,
+    }
+    for k, v in new_fields.items():
+        if v and v.strip():
+            session["data"][k] = v.strip()
+
+    merged = session["data"]
+    log_lead(f"save_lead [{action}] | lead={lead_id} | session={session_id[:12]} | fields={list(merged.keys())}")
 
     lead = {
         "lead_id": lead_id,
-        "name": name, "email": email, "phone": phone,
-        "care_need": care_need, "location": location,
-        "status": "New", "notes": notes,
+        "status": "New",
         "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "age": age, "gender": gender,
-        "living_arrangement": living_arrangement,
-        "physician": physician, "conditions": conditions,
-        "hospitalizations": hospitalizations,
-        "medications": medications, "allergies": allergies,
-        "care_type": care_type, "care_hours": care_hours,
-        "insurance": insurance, "budget": budget,
-        "home_hazards": home_hazards,
-        "medical_equipment": medical_equipment,
-        "other_factors": other_factors,
-        "transportation": transportation,
+        **merged,
     }
 
-    await _upsert_sheet(lead, session_id)
+    has_name    = bool(merged.get("name", "").strip())
+    has_contact = bool(merged.get("phone", "").strip() or merged.get("email", "").strip())
+    has_email   = bool(merged.get("email", "").strip())
 
-    # Save to Supabase
+    # asyncio.shield ensures saves complete even if this function call gets cancelled
     try:
-        import database as _db
-        if _db.db_pool is None:
-            await _db.init_db_pool()
-        await _db.upsert_lead({**lead, "session_id": session_id, "email_sent": _sessions[session_id]["email_sent"]})
-        log_lead(f"Supabase saved | lead={lead_id}")
-    except Exception as e:
-        import traceback
-        log_error(f"Supabase FAILED | lead={lead_id} | {type(e).__name__}: {e}")
-        log_error(traceback.format_exc())
+        await asyncio.shield(_persist_lead(lead, session_id, has_name, has_contact, has_email, email_sent))
+    except asyncio.CancelledError:
+        pass  # _persist_lead continues in background
 
-    has_name    = bool(name.strip())
-    has_contact = bool(phone.strip() or email.strip())
-
-    if has_name and has_contact and not email_sent:
-        result = await _send_email(lead)
-        if result["success"]:
-            _sessions[session_id]["email_sent"] = True
-            try:
-                import database as _db
-                await _db.upsert_lead({**lead, "session_id": session_id, "email_sent": True})
-            except Exception as e:
-                log_error(f"Supabase email_sent update FAILED | lead={lead_id} | {e}")
-
-    log_lead(f"save_lead done | lead={lead_id} | sheet+supabase saved")
     return f"Lead saved. ID: {lead_id}"
 
 async def _google_search(query: str) -> str:

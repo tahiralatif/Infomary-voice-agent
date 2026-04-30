@@ -8,6 +8,7 @@ from database import init_db_pool, close_db_pool, save_message, fetch_history, u
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from logger import log_startup, log_ws, log_llm, log_tool, log_api, log_error, log_success, log_warn, log_divider
+import uvicorn
 import os
 import time
 import json
@@ -28,6 +29,9 @@ async def lifespan(app: FastAPI):
     log_startup("Shutdown complete.")
 
 app = FastAPI(lifespan=lifespan)
+
+log_startup("Voice agent runs separately on port 7860 — run: uv run bot.py")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -610,3 +614,6 @@ async def update_status(req: UpdateLeadStatusRequest):
     except Exception as e:
         log_error(f"update_status failed | lead={req.lead_id} | {e}")
         raise HTTPException(status_code=500, detail="Failed to update status")
+    
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
